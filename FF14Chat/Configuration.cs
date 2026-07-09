@@ -10,6 +10,9 @@ public class TabConfig
 {
     public string Name { get; set; } = "";
     public HashSet<XivChatType> Channels { get; set; } = [];
+
+    /// <summary>Also receives non-combat messages no other tab matched.</summary>
+    public bool CatchAll { get; set; }
 }
 
 [Serializable]
@@ -31,7 +34,7 @@ public class Configuration : IPluginConfiguration
                 XivChatType.Say, XivChatType.Shout, XivChatType.Yell,
                 XivChatType.TellIncoming, XivChatType.TellOutgoing,
                 XivChatType.Party, XivChatType.CrossParty, XivChatType.Alliance,
-                XivChatType.FreeCompany, XivChatType.NoviceNetwork,
+                XivChatType.NoviceNetwork,
                 XivChatType.CustomEmote, XivChatType.StandardEmote,
                 XivChatType.Echo, XivChatType.PvPTeam,
                 XivChatType.Ls1, XivChatType.Ls2, XivChatType.Ls3, XivChatType.Ls4,
@@ -44,7 +47,13 @@ public class Configuration : IPluginConfiguration
         },
         new TabConfig
         {
+            Name = "FC",
+            Channels = [XivChatType.FreeCompany],
+        },
+        new TabConfig
+        {
             Name = "System",
+            CatchAll = true,
             Channels =
             [
                 XivChatType.SystemMessage, XivChatType.SystemError,

@@ -15,6 +15,9 @@ public sealed class TabState
     /// <summary>Channel filter for fixed tabs; null for tell tabs.</summary>
     public HashSet<XivChatType>? Channels { get; init; }
 
+    /// <summary>Also receives non-combat messages no other tab matched.</summary>
+    public bool CatchAll { get; init; }
+
     /// <summary>"Name@World" for tell tabs; null for fixed tabs.</summary>
     public string? TellPartner { get; init; }
 
@@ -52,21 +55,43 @@ public sealed class TabManager
                 Id = "tab:" + tabConfig.Name,
                 Title = tabConfig.Name,
                 Channels = [.. tabConfig.Channels],
+                CatchAll = tabConfig.CatchAll,
             });
         }
     }
 
     public void Route(Message message)
     {
+        // Battle log entries pack source/target flags into the high bits;
+        // the low 7 bits are the base kind, which is what filters care about.
+        var masked = (XivChatType)((ushort)message.Type & 0x7F);
+
         lock (gate)
         {
+            var anyFixedMatch = false;
             foreach (var tab in tabs)
             {
                 var matches = tab.IsTell
                     ? message.TellPartner == tab.TellPartner
-                    : tab.Channels!.Contains(message.Type);
+                    : tab.Channels!.Contains(message.Type) || tab.Channels.Contains(masked);
                 if (matches)
+                {
                     tab.Add(message);
+                    if (!tab.IsTell)
+                        anyFixedMatch = true;
+                }
+            }
+
+            // Unclassified non-combat messages (join notices, obtain lines,
+            // unnamed system kinds) land in the catch-all tab. Combat kinds
+            // (masked 41..55) stay out to avoid battle spam.
+            if (!anyFixedMatch && (ushort)masked is < 41 or > 55)
+            {
+                foreach (var tab in tabs)
+                {
+                    if (tab.CatchAll)
+                        tab.Add(message);
+                }
             }
 
             if (message.TellPartner is { } partner && !tabs.Any(t => t.TellPartner == partner))

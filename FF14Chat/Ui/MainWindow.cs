@@ -154,7 +154,7 @@ public class MainWindow : Window, IDisposable
         foreach (var tab in tabs.Snapshot())
         {
             var label = tab.Unread > 0
-                ? $"{tab.Title} ({tab.Unread})###{tab.Id}"
+                ? $"★ {tab.Title} ({tab.Unread})###{tab.Id}"
                 : $"{tab.Title}###{tab.Id}";
 
             if (tab.IsTell)
