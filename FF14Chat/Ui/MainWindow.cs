@@ -6,6 +6,8 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.Text;
+using Dalamud.Interface.GameFonts;
+using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using FF14Chat.Model;
@@ -41,6 +43,11 @@ public class MainWindow : Window, IDisposable
     private bool slashWasDown;
     private bool pendingSlash;
     private bool clearSelection;
+
+    private readonly IFontHandle gameFont;
+    private System.IDisposable? fontPush;
+    private ImRaii.ColorDisposable? themeColors;
+    private ImRaii.StyleDisposable? themeStyles;
 
     // Conditions in which Enter belongs to the game (advancing NPC dialogue,
     // cutscenes, occupied states), not to the chat window.
@@ -79,12 +86,36 @@ public class MainWindow : Window, IDisposable
         Size = new Vector2(600, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
 
-        Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+        Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                | ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground;
+
+        // The game's own UI font, for the authentic look.
+        gameFont = Plugin.PluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(
+            new GameFontStyle(GameFontFamily.Axis, 17f));
     }
 
     public void Dispose()
     {
         Plugin.Framework.Update -= OnFrameworkUpdate;
+        gameFont.Dispose();
+    }
+
+    public override void PreDraw()
+    {
+        themeColors = FFTheme.PushColors();
+        themeStyles = FFTheme.PushStyles();
+        if (gameFont.Available)
+            fontPush = gameFont.Push();
+    }
+
+    public override void PostDraw()
+    {
+        fontPush?.Dispose();
+        fontPush = null;
+        themeStyles?.Dispose();
+        themeStyles = null;
+        themeColors?.Dispose();
+        themeColors = null;
     }
 
     /// <summary>
@@ -146,6 +177,9 @@ public class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
+        FFTheme.DrawWindowBackground();
+        DrawHeader();
+
         if (focusInput)
             ImGui.SetWindowFocus();
 
@@ -184,6 +218,54 @@ public class MainWindow : Window, IDisposable
         }
 
         selectTabId = null;
+    }
+
+    /// <summary>Title row: drag area, gold title, close button, fading gold rule.</summary>
+    private void DrawHeader()
+    {
+        var width = ImGui.GetWindowWidth();
+        var padding = ImGui.GetStyle().WindowPadding.X;
+        var lineHeight = ImGui.GetTextLineHeight();
+        var headerHeight = lineHeight + 4f;
+        var start = ImGui.GetCursorPos();
+        var screenStart = ImGui.GetCursorScreenPos();
+
+        // Drag anywhere on the header (the window has no native title bar).
+        ImGui.InvisibleButton("##header-drag", new Vector2(width - padding * 2 - 24f, headerHeight));
+        if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
+            ImGui.SetWindowPos(ImGui.GetWindowPos() + ImGui.GetIO().MouseDelta);
+
+        ImGui.SetCursorPos(start + new Vector2(2f, 2f));
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.GoldBright))
+        {
+            ImGui.TextUnformatted("Chat");
+        }
+
+        DrawCloseButton(new Vector2(width - padding - 18f, start.Y + 2f));
+
+        FFTheme.DrawFadingSeparator(
+            screenStart + new Vector2(0, headerHeight + 3f),
+            width - padding * 2);
+
+        ImGui.SetCursorPos(new Vector2(start.X, start.Y + headerHeight + 8f));
+    }
+
+    private void DrawCloseButton(Vector2 cursorPos)
+    {
+        ImGui.SetCursorPos(cursorPos);
+        var size = ImGui.GetTextLineHeight();
+        if (ImGui.InvisibleButton("##close", new Vector2(size, size)))
+            IsOpen = false;
+
+        var hovered = ImGui.IsItemHovered();
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        var inset = size * 0.26f;
+        var color = ImGui.GetColorU32(hovered ? FFTheme.GoldBright : FFTheme.TextDim);
+
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddLine(min + new Vector2(inset, inset), max - new Vector2(inset, inset), color, 1.5f);
+        drawList.AddLine(new Vector2(max.X - inset, min.Y + inset), new Vector2(min.X + inset, max.Y - inset), color, 1.5f);
     }
 
     /// <summary>Draws a count bubble over the tab header (the last ImGui item).</summary>
