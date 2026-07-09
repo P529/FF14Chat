@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.Text;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using FF14Chat.Model;
 using FF14Chat.Services;
+using FFXIVClientStructs.FFXIV.Client.UI;
 
 namespace FF14Chat.Ui;
 
@@ -15,9 +17,16 @@ public class MainWindow : Window, IDisposable
     // Rendering is not virtualized yet, so cap how much we lay out per frame.
     private const int MaxRenderedMessages = 500;
 
+    private const int MaxHistory = 100;
+
     private readonly Plugin plugin;
     private readonly TabManager tabs;
     private readonly Dictionary<string, string> drafts = [];
+
+    private readonly List<string> sentHistory = [];
+    private int historyPos = -1;
+    private string historyStash = string.Empty;
+    private bool focusInput;
 
     public MainWindow(Plugin plugin, TabManager tabs) : base("FF14Chat###FF14ChatMain")
     {
@@ -39,6 +48,8 @@ public class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
+        HandleChatKey();
+
         using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable);
         if (!tabBar.Success)
             return;
@@ -103,15 +114,45 @@ public class MainWindow : Window, IDisposable
             ImGui.SetScrollHereY(1f);
     }
 
-    private void DrawInput(TabState tab)
+    /// <summary>
+    /// Lets Enter open our input like the vanilla chat key: when the window is
+    /// open and no text field (game or ImGui) is active, focus the input and
+    /// swallow the key so the vanilla chat box does not open too.
+    /// </summary>
+    private unsafe void HandleChatKey()
+    {
+        if (ImGui.GetIO().WantTextInput)
+            return;
+
+        if (!ImGui.IsKeyPressed(ImGuiKey.Enter, false) && !ImGui.IsKeyPressed(ImGuiKey.KeypadEnter, false))
+            return;
+
+        var atkModule = RaptureAtkModule.Instance();
+        if (atkModule != null && atkModule->AtkModule.IsTextInputActive())
+            return;
+
+        ImGui.SetWindowFocus(WindowName);
+        focusInput = true;
+        Plugin.KeyState[VirtualKey.RETURN] = false;
+    }
+
+    private unsafe void DrawInput(TabState tab)
     {
         drafts.TryGetValue(tab.Id, out var draft);
         draft ??= string.Empty;
 
+        if (focusInput)
+        {
+            ImGui.SetKeyboardFocusHere();
+            focusInput = false;
+        }
+
         var hint = tab.IsTell ? $"Message {tab.Title}…" : "Chat or /command…";
         ImGui.SetNextItemWidth(-1);
         var submitted = ImGui.InputTextWithHint(
-            $"##input{tab.Id}", hint, ref draft, 500, ImGuiInputTextFlags.EnterReturnsTrue);
+            $"##input{tab.Id}", hint, ref draft, 500,
+            ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory,
+            HistoryCallback);
         drafts[tab.Id] = draft;
 
         if (!submitted)
@@ -124,7 +165,44 @@ public class MainWindow : Window, IDisposable
         ImGui.SetKeyboardFocusHere(-1);
     }
 
-    private static bool Submit(TabState tab, string draft)
+    private int HistoryCallback(ImGuiInputTextCallbackDataPtr data)
+    {
+        if (data.EventFlag != ImGuiInputTextFlags.CallbackHistory || sentHistory.Count == 0)
+            return 0;
+
+        int newPos;
+        if (data.EventKey == ImGuiKey.UpArrow)
+        {
+            if (historyPos == -1)
+            {
+                // Entering history: stash whatever is being typed.
+                historyStash = System.Text.Encoding.UTF8.GetString(data.BufTextSpan);
+                newPos = sentHistory.Count - 1;
+            }
+            else
+            {
+                newPos = Math.Max(0, historyPos - 1);
+            }
+        }
+        else if (data.EventKey == ImGuiKey.DownArrow)
+        {
+            if (historyPos == -1)
+                return 0;
+            newPos = historyPos + 1 >= sentHistory.Count ? -1 : historyPos + 1;
+        }
+        else
+        {
+            return 0;
+        }
+
+        historyPos = newPos;
+        var replacement = newPos == -1 ? historyStash : sentHistory[newPos];
+        data.DeleteChars(0, data.BufTextLen);
+        data.InsertChars(0, replacement);
+        return 0;
+    }
+
+    private bool Submit(TabState tab, string draft)
     {
         var text = draft.Trim();
         if (text.Length == 0)
@@ -136,7 +214,19 @@ public class MainWindow : Window, IDisposable
                 ? $"/tell {tab.TellPartner} {text}"
                 : text;
 
-        return ChatSender.Send(toSend);
+        if (!ChatSender.Send(toSend))
+            return false;
+
+        if (sentHistory.Count == 0 || sentHistory[^1] != text)
+        {
+            sentHistory.Add(text);
+            if (sentHistory.Count > MaxHistory)
+                sentHistory.RemoveAt(0);
+        }
+
+        historyPos = -1;
+        historyStash = string.Empty;
+        return true;
     }
 
     private static void DrawMessage(Message message)
