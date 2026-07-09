@@ -12,11 +12,13 @@ public sealed class ChatCapture : IDisposable
 {
     private readonly MessageStore store;
     private readonly TabManager tabs;
+    private readonly MessageDatabase database;
 
-    public ChatCapture(MessageStore store, TabManager tabs)
+    public ChatCapture(MessageStore store, TabManager tabs, MessageDatabase database)
     {
         this.store = store;
         this.tabs = tabs;
+        this.database = database;
         Plugin.ChatGui.ChatMessage += OnChatMessage;
     }
 
@@ -41,6 +43,7 @@ public sealed class ChatCapture : IDisposable
 
         store.Add(message);
         tabs.Route(message);
+        database.Enqueue(message);
     }
 
     /// <summary>

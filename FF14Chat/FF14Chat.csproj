@@ -5,4 +5,18 @@
     <Description>Chat replacement: tabbed chat with per-person tell tabs, command autocompletion, persistent history.</Description>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <!-- Override the vulnerable transitive native sqlite lib (NU1903). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
+  <!-- Dalamud's plugin load context probes the plugin directory for native
+       libraries, so the sqlite native dll must sit next to the plugin dll. -->
+  <Target Name="CopySqliteNative" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll')" />
+  </Target>
 </Project>

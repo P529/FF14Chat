@@ -22,9 +22,12 @@ public sealed class Plugin : IDalamudPlugin
 
     private const string CommandName = "/ff14chat";
 
+    private const int HydrateLimit = 1000;
+
     public Configuration Configuration { get; init; }
     public MessageStore MessageStore { get; init; }
     public TabManager TabManager { get; init; }
+    public MessageDatabase Database { get; init; }
 
     public readonly WindowSystem WindowSystem = new("FF14Chat");
     private ChatCapture ChatCapture { get; init; }
@@ -36,7 +39,12 @@ public sealed class Plugin : IDalamudPlugin
 
         MessageStore = new MessageStore();
         TabManager = new TabManager(Configuration);
-        ChatCapture = new ChatCapture(MessageStore, TabManager);
+
+        Database = new MessageDatabase(
+            System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "chat.db"));
+        HydrateFromDatabase();
+
+        ChatCapture = new ChatCapture(MessageStore, TabManager, Database);
 
         MainWindow = new MainWindow(this, TabManager);
         WindowSystem.AddWindow(MainWindow);
@@ -58,8 +66,29 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
         MainWindow.Dispose();
         ChatCapture.Dispose();
+        Database.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
+    }
+
+    private void HydrateFromDatabase()
+    {
+        try
+        {
+            foreach (var message in Database.LoadRecent(HydrateLimit))
+            {
+                MessageStore.Add(message);
+                TabManager.Route(message);
+            }
+        }
+        catch (System.Exception e)
+        {
+            Log.Error(e, "Failed to load chat history");
+        }
+
+        // Restored history is not new.
+        foreach (var tab in TabManager.Snapshot())
+            TabManager.MarkRead(tab);
     }
 
     private void OnCommand(string command, string args) => MainWindow.Toggle();
