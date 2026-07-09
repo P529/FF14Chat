@@ -90,6 +90,10 @@ public class MainWindow : Window, IDisposable
 
         Flags = BaseFlags;
 
+        // Chat is a permanent fixture: open on load, immune to Escape.
+        IsOpen = true;
+        RespectCloseHotkey = false;
+
         gameFont = CreateFont();
     }
 
