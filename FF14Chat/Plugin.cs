@@ -22,6 +22,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public Configuration Configuration { get; init; }
     public MessageStore MessageStore { get; init; }
+    public TabManager TabManager { get; init; }
 
     public readonly WindowSystem WindowSystem = new("FF14Chat");
     private ChatCapture ChatCapture { get; init; }
@@ -32,9 +33,10 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
         MessageStore = new MessageStore();
-        ChatCapture = new ChatCapture(MessageStore);
+        TabManager = new TabManager(Configuration);
+        ChatCapture = new ChatCapture(MessageStore, TabManager);
 
-        MainWindow = new MainWindow(this, MessageStore);
+        MainWindow = new MainWindow(this, TabManager);
         WindowSystem.AddWindow(MainWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)

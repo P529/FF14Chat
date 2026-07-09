@@ -16,14 +16,12 @@ public class MainWindow : Window, IDisposable
     private const int MaxRenderedMessages = 500;
 
     private readonly Plugin plugin;
-    private readonly MessageStore store;
+    private readonly TabManager tabs;
 
-    private long lastRenderedRevision = -1;
-
-    public MainWindow(Plugin plugin, MessageStore store) : base("FF14Chat###FF14ChatMain")
+    public MainWindow(Plugin plugin, TabManager tabs) : base("FF14Chat###FF14ChatMain")
     {
         this.plugin = plugin;
-        this.store = store;
+        this.tabs = tabs;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -40,15 +38,47 @@ public class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
+        using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable);
+        if (!tabBar.Success)
+            return;
+
+        foreach (var tab in tabs.Snapshot())
+        {
+            var label = tab.Unread > 0
+                ? $"{tab.Title} ({tab.Unread})###{tab.Id}"
+                : $"{tab.Title}###{tab.Id}";
+
+            if (tab.IsTell)
+            {
+                var open = true;
+                using var item = ImRaii.TabItem(label, ref open);
+                if (item.Success)
+                    DrawTab(tab);
+                if (!open)
+                    tabs.Close(tab);
+            }
+            else
+            {
+                using var item = ImRaii.TabItem(label);
+                if (item.Success)
+                    DrawTab(tab);
+            }
+        }
+    }
+
+    private void DrawTab(TabState tab)
+    {
+        tabs.MarkRead(tab);
+
         using var spacing = ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(4, 2));
         using var child = ImRaii.Child("##log", new Vector2(-1, -1), false);
         if (!child.Success)
             return;
 
-        var messages = store.Snapshot();
+        var messages = tabs.MessagesSnapshot(tab);
         var pinnedToBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 1f;
-        var newMessages = store.Revision != lastRenderedRevision;
-        lastRenderedRevision = store.Revision;
+        var newMessages = tab.Revision != tab.RenderedRevision;
+        tab.RenderedRevision = tab.Revision;
 
         if (messages.Length == 0)
         {
@@ -127,7 +157,7 @@ public class MainWindow : Window, IDisposable
         {
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             var name = segment.ItemName ?? $"Item #{segment.ItemId}";
-            ImGui.SetTooltip(segment.ItemHq ? $"{name} " : name);
+            ImGui.SetTooltip(segment.ItemHq ? $"{name} " : name);
         }
     }
 
