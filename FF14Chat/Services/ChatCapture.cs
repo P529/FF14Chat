@@ -28,6 +28,7 @@ public sealed class ChatCapture : IDisposable
             Type = message.LogKind,
             Sender = message.Sender.TextValue,
             Text = message.Message.TextValue,
+            Segments = MessageParser.Parse(message.Message),
             SenderRaw = message.Sender.Encode(),
             MessageRaw = message.Message.Encode(),
         });
