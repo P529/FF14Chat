@@ -10,9 +10,12 @@ using Dalamud.Interface.GameFonts;
 using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
+using Dalamud.Hooking;
 using FF14Chat.Model;
 using FF14Chat.Services;
+using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Shell;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace FF14Chat.Ui;
@@ -95,6 +98,58 @@ public class MainWindow : Window, IDisposable
         RespectCloseHotkey = false;
 
         gameFont = CreateFont();
+
+        unsafe
+        {
+            setContextTellTargetHook = Plugin.GameInterop.HookFromAddress<SetContextTellTargetDelegate>(
+                (nint)RaptureShellModule.MemberFunctionPointers.SetContextTellTarget,
+                SetContextTellTargetDetour);
+        }
+
+        setContextTellTargetHook.Enable();
+    }
+
+    private unsafe delegate bool SetContextTellTargetDelegate(
+        RaptureShellModule* module, Utf8String* playerName, Utf8String* worldName,
+        ushort worldId, ulong contentId, ulong accountId, ushort reason, bool a8);
+
+    private readonly Hook<SetContextTellTargetDelegate> setContextTellTargetHook;
+
+    /// <summary>
+    /// "Send Tell" from the game's context menus lands here. While we're the
+    /// active chat, open our tell tab instead of the native chat input.
+    /// </summary>
+    private unsafe bool SetContextTellTargetDetour(
+        RaptureShellModule* module, Utf8String* playerName, Utf8String* worldName,
+        ushort worldId, ulong contentId, ulong accountId, ushort reason, bool a8)
+    {
+        try
+        {
+            if (IsOpen && plugin.Configuration.HideVanillaChat && playerName != null)
+            {
+                var name = playerName->ToString();
+                var world = worldName != null ? worldName->ToString() : string.Empty;
+                if (world.Length == 0
+                    && Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>().TryGetRow(worldId, out var worldRow))
+                {
+                    world = worldRow.Name.ExtractText();
+                }
+
+                if (name.Length > 0)
+                {
+                    var tellTab = tabs.OpenTellTab(world.Length > 0 ? $"{name}@{world}" : name);
+                    selectTabId = tellTab.Id;
+                    focusInput = true;
+                    return true;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "SetContextTellTarget detour failed");
+        }
+
+        return setContextTellTargetHook.Original(module, playerName, worldName, worldId, contentId, accountId, reason, a8);
     }
 
     /// <summary>
@@ -145,6 +200,7 @@ public class MainWindow : Window, IDisposable
     public void Dispose()
     {
         Plugin.Framework.Update -= OnFrameworkUpdate;
+        setContextTellTargetHook.Dispose();
         SetVanillaChatVisible(true);
         gameFont.Dispose();
     }
@@ -296,7 +352,9 @@ public class MainWindow : Window, IDisposable
         if (focusInput)
             ImGui.SetWindowFocus();
 
-        using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable);
+        // FittingPolicyScroll: overflowing tabs scroll horizontally (with
+        // arrow buttons) instead of shrinking.
+        using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable | ImGuiTabBarFlags.FittingPolicyScroll);
         if (!tabBar.Success)
             return;
 
