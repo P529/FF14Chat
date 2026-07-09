@@ -31,6 +31,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>One-shot: window was initially placed over the vanilla chat.</summary>
     public bool PlacedAtVanillaChat { get; set; }
 
+    /// <summary>Chat font size in px; must be a native Axis size (10, 12, 14, 18).</summary>
+    public int FontSize { get; set; } = 12;
+
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
 
     private static List<TabConfig> DefaultTabs() =>

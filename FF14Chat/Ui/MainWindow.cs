@@ -45,7 +45,8 @@ public class MainWindow : Window, IDisposable
     private bool pendingSlash;
     private bool clearSelection;
 
-    private readonly IFontHandle gameFont;
+    private IFontHandle gameFont;
+    private bool vanillaHidden;
     private System.IDisposable? fontPush;
     private ImRaii.ColorDisposable? themeColors;
     private ImRaii.StyleDisposable? themeStyles;
@@ -89,10 +90,48 @@ public class MainWindow : Window, IDisposable
 
         Flags = BaseFlags;
 
-        // The game's own UI font. Must be one of the game's native bitmap
-        // sizes (Axis14 is the vanilla chat default) or it scales and blurs.
-        gameFont = Plugin.PluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(
-            new GameFontStyle(GameFontFamilyAndSize.Axis14));
+        gameFont = CreateFont();
+    }
+
+    /// <summary>
+    /// The game's own UI font. Must be one of the game's native bitmap sizes
+    /// or it scales and blurs.
+    /// </summary>
+    private IFontHandle CreateFont()
+    {
+        var family = plugin.Configuration.FontSize switch
+        {
+            <= 10 => GameFontFamilyAndSize.Axis96,
+            <= 12 => GameFontFamilyAndSize.Axis12,
+            <= 14 => GameFontFamilyAndSize.Axis14,
+            _ => GameFontFamilyAndSize.Axis18,
+        };
+        return Plugin.PluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(new GameFontStyle(family));
+    }
+
+    /// <summary>Called by settings when the font size changes.</summary>
+    public void RebuildFont()
+    {
+        gameFont.Dispose();
+        gameFont = CreateFont();
+    }
+
+    /// <summary>Mirror vanilla chat visibility rules: only in the world, UI shown, no cutscene.</summary>
+    public override bool DrawConditions()
+    {
+        if (!Plugin.ClientState.IsLoggedIn)
+            return false;
+        if (Plugin.GameGui.GameUiHidden)
+            return false;
+        if (Plugin.Condition[ConditionFlag.WatchingCutscene]
+            || Plugin.Condition[ConditionFlag.WatchingCutscene78]
+            || Plugin.Condition[ConditionFlag.OccupiedInCutSceneEvent]
+            || Plugin.Condition[ConditionFlag.CreatingCharacter])
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private const ImGuiWindowFlags BaseFlags =
@@ -148,7 +187,22 @@ public class MainWindow : Window, IDisposable
 
     private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
-        SetVanillaChatVisible(!(IsOpen && plugin.Configuration.HideVanillaChat));
+        // Hide vanilla chat while we're replacing it; restore it exactly once
+        // when we stop, so cutscene/logout visibility stays the game's call.
+        var shouldHide = IsOpen && plugin.Configuration.HideVanillaChat && Plugin.ClientState.IsLoggedIn;
+        if (shouldHide)
+        {
+            SetVanillaChatVisible(false);
+            vanillaHidden = true;
+        }
+        else if (vanillaHidden)
+        {
+            SetVanillaChatVisible(true);
+            vanillaHidden = false;
+        }
+
+        if (!Plugin.ClientState.IsLoggedIn)
+            return;
 
         var enterDown = Plugin.KeyState[VirtualKey.RETURN];
         var enterPressed = enterDown && !enterWasDown;
@@ -286,6 +340,7 @@ public class MainWindow : Window, IDisposable
             ImGui.TextUnformatted("Chat");
         }
 
+        DrawGearButton(new Vector2(width - padding - 66f, start.Y + 2f));
         DrawLockButton(new Vector2(width - padding - 42f, start.Y + 2f));
         DrawCloseButton(new Vector2(width - padding - 18f, start.Y + 2f));
 
@@ -294,6 +349,32 @@ public class MainWindow : Window, IDisposable
             width - padding * 2);
 
         ImGui.SetCursorPos(new Vector2(start.X, start.Y + headerHeight + 8f));
+    }
+
+    private void DrawGearButton(Vector2 cursorPos)
+    {
+        ImGui.SetCursorPos(cursorPos);
+        var size = ImGui.GetTextLineHeight();
+        if (ImGui.InvisibleButton("##settings", new Vector2(size, size)))
+            plugin.ToggleConfigUi();
+
+        var hovered = ImGui.IsItemHovered();
+        if (hovered)
+            ImGui.SetTooltip("Settings");
+
+        var min = ImGui.GetItemRectMin();
+        var center = min + new Vector2(size / 2f, size / 2f);
+        var radius = size * 0.27f;
+        var color = ImGui.GetColorU32(hovered ? FFTheme.GoldBright : FFTheme.TextDim);
+        var drawList = ImGui.GetWindowDrawList();
+
+        drawList.AddCircle(center, radius, color, 12, 1.6f);
+        for (var i = 0; i < 8; i++)
+        {
+            var angle = MathF.Tau * i / 8f;
+            var dir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+            drawList.AddLine(center + dir * radius, center + dir * (radius + size * 0.14f), color, 1.6f);
+        }
     }
 
     private void DrawLockButton(Vector2 cursorPos)

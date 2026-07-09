@@ -35,6 +35,7 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("FF14Chat");
     private ChatCapture ChatCapture { get; init; }
     private MainWindow MainWindow { get; init; }
+    private SettingsWindow SettingsWindow { get; init; }
 
     public Plugin()
     {
@@ -50,7 +51,9 @@ public sealed class Plugin : IDalamudPlugin
         ChatCapture = new ChatCapture(MessageStore, TabManager, Database);
 
         MainWindow = new MainWindow(this, TabManager);
+        SettingsWindow = new SettingsWindow(this, MainWindow);
         WindowSystem.AddWindow(MainWindow);
+        WindowSystem.AddWindow(SettingsWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -59,14 +62,17 @@ public sealed class Plugin : IDalamudPlugin
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
+        PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
     }
 
     public void Dispose()
     {
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
+        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
 
         WindowSystem.RemoveAllWindows();
+        SettingsWindow.Dispose();
         MainWindow.Dispose();
         ChatCapture.Dispose();
         Database.Dispose();
@@ -97,4 +103,6 @@ public sealed class Plugin : IDalamudPlugin
     private void OnCommand(string command, string args) => MainWindow.Toggle();
 
     public void ToggleMainUi() => MainWindow.Toggle();
+
+    public void ToggleConfigUi() => SettingsWindow.Toggle();
 }
