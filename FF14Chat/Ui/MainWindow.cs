@@ -30,6 +30,11 @@ public class MainWindow : Window, IDisposable
     private string historyStash = string.Empty;
     private bool focusInput;
 
+    private readonly CommandIndex commandIndex = new();
+    private List<CommandEntry> suggestions = [];
+    private int suggestionIndex;
+    private string suggestionQuery = string.Empty;
+
     private bool enterWasDown;
     private bool slashWasDown;
     private bool pendingSlash;
@@ -226,12 +231,19 @@ public class MainWindow : Window, IDisposable
         }
 
         var hint = tab.IsTell ? $"Message {tab.Title}…" : "Chat or /command…";
+        var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
         var submitted = ImGui.InputTextWithHint(
             $"##input{tab.Id}", hint, ref draft, 500,
-            ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory | ImGuiInputTextFlags.CallbackAlways,
+            ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory
+            | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion,
             InputCallback);
+        var inputActive = ImGui.IsItemActive();
         drafts[tab.Id] = draft;
+
+        UpdateSuggestions(draft, inputActive || focusInput);
+        if (suggestions.Count > 0)
+            DrawSuggestions(tab, inputPos);
 
         if (!submitted)
             return;
@@ -241,6 +253,69 @@ public class MainWindow : Window, IDisposable
 
         // Keep typing without re-clicking the field.
         ImGui.SetKeyboardFocusHere(-1);
+    }
+
+    private void UpdateSuggestions(string draft, bool inputActive)
+    {
+        var wantSuggestions = inputActive
+                              && draft.Length > 1
+                              && draft[0] == '/'
+                              && !draft.Contains(' ');
+        if (!wantSuggestions)
+        {
+            suggestions = [];
+            suggestionQuery = string.Empty;
+            return;
+        }
+
+        if (draft != suggestionQuery)
+        {
+            suggestionQuery = draft;
+            suggestions = commandIndex.Query(draft);
+            suggestionIndex = 0;
+        }
+    }
+
+    private void DrawSuggestions(TabState tab, Vector2 inputPos)
+    {
+        var lineHeight = ImGui.GetTextLineHeightWithSpacing();
+        var height = suggestions.Count * lineHeight + ImGui.GetStyle().WindowPadding.Y * 2;
+        var width = Math.Max(320f, ImGui.GetWindowWidth() * 0.6f);
+
+        ImGui.SetNextWindowPos(new Vector2(inputPos.X, inputPos.Y - height - 4));
+        ImGui.SetNextWindowSize(new Vector2(width, height));
+
+        const ImGuiWindowFlags flags =
+            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove
+            | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNavFocus
+            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar;
+
+        // Drawn as an overlay window so it can float above the input.
+        if (!ImGui.Begin("##ff14chat-suggestions", flags))
+        {
+            ImGui.End();
+            return;
+        }
+
+        for (var i = 0; i < suggestions.Count; i++)
+        {
+            var entry = suggestions[i];
+            var selected = i == suggestionIndex;
+            if (ImGui.Selectable($"{entry.Command}##sugg{i}", selected))
+            {
+                drafts[tab.Id] = entry.Command + " ";
+                focusInput = true;
+            }
+
+            if (entry.Description.Length > 0)
+            {
+                ImGui.SameLine();
+                using var dim = ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp);
+                ImGui.TextUnformatted(entry.Description);
+            }
+        }
+
+        ImGui.End();
     }
 
     private int InputCallback(ImGuiInputTextCallbackDataPtr data)
@@ -260,7 +335,33 @@ public class MainWindow : Window, IDisposable
             return 0;
         }
 
-        if (data.EventFlag != ImGuiInputTextFlags.CallbackHistory || sentHistory.Count == 0)
+        // Tab: accept the highlighted suggestion.
+        if (data.EventFlag == ImGuiInputTextFlags.CallbackCompletion)
+        {
+            if (suggestions.Count > 0)
+            {
+                var completed = suggestions[Math.Clamp(suggestionIndex, 0, suggestions.Count - 1)].Command + " ";
+                data.DeleteChars(0, data.BufTextLen);
+                data.InsertChars(0, completed);
+            }
+
+            return 0;
+        }
+
+        if (data.EventFlag != ImGuiInputTextFlags.CallbackHistory)
+            return 0;
+
+        // While suggestions are open, up/down moves the highlight, not history.
+        if (suggestions.Count > 0)
+        {
+            if (data.EventKey == ImGuiKey.UpArrow)
+                suggestionIndex = (suggestionIndex - 1 + suggestions.Count) % suggestions.Count;
+            else if (data.EventKey == ImGuiKey.DownArrow)
+                suggestionIndex = (suggestionIndex + 1) % suggestions.Count;
+            return 0;
+        }
+
+        if (sentHistory.Count == 0)
             return 0;
 
         int newPos;
