@@ -83,13 +83,13 @@ public static class FFTheme
 
     private static float BorderThickness => theme == ChatTheme.ClassicBlue ? 2f : 1f;
 
-    private static Vector4 FrameBg => theme switch
+    private static Vector4 FrameBg => WithOpacity(theme switch
     {
         ChatTheme.ClassicBlue => new Vector4(0.005f, 0.010f, 0.220f, 0.85f),
         ChatTheme.Ff7Remake => new Vector4(0.045f, 0.095f, 0.150f, 0.85f),
         ChatTheme.RichGold => new Vector4(0.055f, 0.055f, 0.075f, 0.90f),
         _ => new Vector4(0.055f, 0.055f, 0.075f, 0.70f),
-    };
+    });
 
     private static Vector4 FrameBgHover => theme switch
     {
@@ -107,29 +107,34 @@ public static class FFTheme
         _ => new Vector4(0.120f, 0.120f, 0.155f, 0.90f),
     };
 
-    private static Vector4 TabIdle => theme switch
+    /// <summary>Scales a fill's alpha with the window opacity.</summary>
+    private static Vector4 WithOpacity(Vector4 color) => color with { W = color.W * opacity };
+
+    // Tab fills scale with the window opacity so the selected tab doesn't
+    // sit as an opaque block on a translucent panel.
+    private static Vector4 TabIdle => WithOpacity(theme switch
     {
         ChatTheme.ClassicBlue => new Vector4(0.030f, 0.060f, 0.340f, 0.70f),
         ChatTheme.Ff7Remake => new Vector4(0.060f, 0.130f, 0.200f, 0.65f),
         ChatTheme.RichGold => new Vector4(0.130f, 0.130f, 0.165f, 0.85f),
         _ => new Vector4(0.130f, 0.130f, 0.165f, 0.55f),
-    };
+    });
 
-    private static Vector4 TabHover => theme switch
+    private static Vector4 TabHover => WithOpacity(theme switch
     {
         ChatTheme.ClassicBlue => new Vector4(0.110f, 0.170f, 0.520f, 0.95f),
         ChatTheme.Ff7Remake => new Vector4(0.120f, 0.290f, 0.430f, 0.95f),
         ChatTheme.RichGold => new Vector4(0.230f, 0.225f, 0.270f, 1f),
         _ => new Vector4(0.230f, 0.225f, 0.270f, 0.85f),
-    };
+    });
 
-    private static Vector4 TabSelected => theme switch
+    private static Vector4 TabSelected => WithOpacity(theme switch
     {
-        ChatTheme.ClassicBlue => new Vector4(0.150f, 0.220f, 0.580f, 1f),
-        ChatTheme.Ff7Remake => new Vector4(0.145f, 0.350f, 0.520f, 1f),
-        ChatTheme.RichGold => new Vector4(0.265f, 0.255f, 0.300f, 1f),
-        _ => new Vector4(0.265f, 0.255f, 0.300f, 0.90f),
-    };
+        ChatTheme.ClassicBlue => new Vector4(0.150f, 0.220f, 0.580f, 0.90f),
+        ChatTheme.Ff7Remake => new Vector4(0.145f, 0.350f, 0.520f, 0.90f),
+        ChatTheme.RichGold => new Vector4(0.265f, 0.255f, 0.300f, 0.90f),
+        _ => new Vector4(0.265f, 0.255f, 0.300f, 0.85f),
+    });
 
     private static Vector4 PanelBg => theme switch
     {
