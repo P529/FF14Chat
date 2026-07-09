@@ -17,6 +17,7 @@ public class MainWindow : Window, IDisposable
 
     private readonly Plugin plugin;
     private readonly TabManager tabs;
+    private readonly Dictionary<string, string> drafts = [];
 
     public MainWindow(Plugin plugin, TabManager tabs) : base("FF14Chat###FF14ChatMain")
     {
@@ -70,11 +71,18 @@ public class MainWindow : Window, IDisposable
     {
         tabs.MarkRead(tab);
 
-        using var spacing = ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(4, 2));
-        using var child = ImRaii.Child("##log", new Vector2(-1, -1), false);
-        if (!child.Success)
-            return;
+        using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(4, 2)))
+        using (var child = ImRaii.Child("##log", new Vector2(-1, -ImGui.GetFrameHeightWithSpacing()), false))
+        {
+            if (child.Success)
+                DrawLog(tab);
+        }
 
+        DrawInput(tab);
+    }
+
+    private void DrawLog(TabState tab)
+    {
         var messages = tabs.MessagesSnapshot(tab);
         var pinnedToBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 1f;
         var newMessages = tab.Revision != tab.RenderedRevision;
@@ -93,6 +101,42 @@ public class MainWindow : Window, IDisposable
 
         if (pinnedToBottom && newMessages)
             ImGui.SetScrollHereY(1f);
+    }
+
+    private void DrawInput(TabState tab)
+    {
+        drafts.TryGetValue(tab.Id, out var draft);
+        draft ??= string.Empty;
+
+        var hint = tab.IsTell ? $"Message {tab.Title}…" : "Chat or /command…";
+        ImGui.SetNextItemWidth(-1);
+        var submitted = ImGui.InputTextWithHint(
+            $"##input{tab.Id}", hint, ref draft, 500, ImGuiInputTextFlags.EnterReturnsTrue);
+        drafts[tab.Id] = draft;
+
+        if (!submitted)
+            return;
+
+        if (Submit(tab, draft))
+            drafts[tab.Id] = string.Empty;
+
+        // Keep typing without re-clicking the field.
+        ImGui.SetKeyboardFocusHere(-1);
+    }
+
+    private static bool Submit(TabState tab, string draft)
+    {
+        var text = draft.Trim();
+        if (text.Length == 0)
+            return true;
+
+        var toSend = text[0] == '/'
+            ? text
+            : tab.IsTell
+                ? $"/tell {tab.TellPartner} {text}"
+                : text;
+
+        return ChatSender.Send(toSend);
     }
 
     private static void DrawMessage(Message message)
@@ -193,7 +237,8 @@ public class MainWindow : Window, IDisposable
             XivChatType.TellOutgoing => $">> {message.Sender}:",
             XivChatType.Party or XivChatType.CrossParty => $"({message.Sender})",
             XivChatType.Alliance => $"(({message.Sender}))",
-            XivChatType.CustomEmote or XivChatType.StandardEmote => message.Sender,
+            // Emote messages already contain the player's name in the text.
+            XivChatType.CustomEmote or XivChatType.StandardEmote => string.Empty,
             XivChatType.FreeCompany => $"[FC]<{message.Sender}>",
             _ => $"{message.Sender}:",
         };
