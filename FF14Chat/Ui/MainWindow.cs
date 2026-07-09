@@ -189,11 +189,37 @@ public class MainWindow : Window, IDisposable
         }
     }
 
+    /// <summary>
+    /// True while the game's own chat input has keyboard focus. Happens even
+    /// with the chat hidden: the game opens it for reply flows and the '/'
+    /// character shortcut, and it would silently swallow all typing.
+    /// </summary>
+    private static unsafe bool IsVanillaChatInputFocused()
+    {
+        var atkModule = RaptureAtkModule.Instance();
+        if (atkModule == null || !atkModule->AtkModule.IsTextInputActive())
+            return false;
+
+        var unitManager = &AtkStage.Instance()->RaptureAtkUnitManager->AtkUnitManager;
+        foreach (var entry in unitManager->FocusedUnitsList.Entries)
+        {
+            var unit = entry.Value;
+            if (unit != null && unit->NameString == "ChatLog")
+                return true;
+        }
+
+        return false;
+    }
+
     private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
         // Hide vanilla chat while we're replacing it; restore it exactly once
         // when we stop, so cutscene/logout visibility stays the game's call.
-        var shouldHide = IsOpen && plugin.Configuration.HideVanillaChat && Plugin.ClientState.IsLoggedIn;
+        // While the game's own chat input is focused (reply flows, the '/'
+        // char shortcut), show vanilla chat so typing is visible instead of
+        // going into an invisible box.
+        var shouldHide = IsOpen && plugin.Configuration.HideVanillaChat && Plugin.ClientState.IsLoggedIn
+                         && !IsVanillaChatInputFocused();
         if (shouldHide)
         {
             SetVanillaChatVisible(false);
@@ -331,7 +357,9 @@ public class MainWindow : Window, IDisposable
         var screenStart = ImGui.GetCursorScreenPos();
 
         // Drag anywhere on the header (the window has no native title bar).
-        ImGui.InvisibleButton("##header-drag", new Vector2(width - padding * 2 - 48f, headerHeight));
+        // Must stop short of the gear/lock/close buttons: an overlapping
+        // earlier button steals their clicks.
+        ImGui.InvisibleButton("##header-drag", new Vector2(width - padding * 2 - 76f, headerHeight));
         if (!plugin.Configuration.LockWindow
             && ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
         {
@@ -480,8 +508,10 @@ public class MainWindow : Window, IDisposable
     private void DrawLog(TabState tab)
     {
         var messages = tabs.MessagesSnapshot(tab);
-        var pinnedToBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 1f;
-        var newMessages = tab.Revision != tab.RenderedRevision;
+        // First draw of a tab (e.g. history just hydrated) starts pinned.
+        var firstDraw = tab.RenderedRevision == -1;
+        var pinnedToBottom = firstDraw || ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 1f;
+        var newMessages = firstDraw || tab.Revision != tab.RenderedRevision;
         tab.RenderedRevision = tab.Revision;
 
         if (messages.Length == 0)

@@ -18,6 +18,9 @@ public sealed class TabState
     /// <summary>Also receives non-combat messages no other tab matched.</summary>
     public bool CatchAll { get; init; }
 
+    /// <summary>Whether arriving messages increment the unread badge.</summary>
+    public bool TrackUnread { get; init; }
+
     /// <summary>"Name@World" for tell tabs; null for fixed tabs.</summary>
     public string? TellPartner { get; init; }
 
@@ -36,7 +39,8 @@ public sealed class TabState
         if (Messages.Count > MaxMessages)
             Messages.RemoveRange(0, Messages.Count - MaxMessages);
         Revision++;
-        Unread++;
+        if (TrackUnread)
+            Unread++;
     }
 }
 
@@ -56,6 +60,7 @@ public sealed class TabManager
                 Title = tabConfig.Name,
                 Channels = [.. tabConfig.Channels],
                 CatchAll = tabConfig.CatchAll,
+                TrackUnread = tabConfig.NotifyUnread,
             });
         }
     }
@@ -101,6 +106,7 @@ public sealed class TabManager
                     Id = "tell:" + partner,
                     Title = partner.Split('@')[0],
                     TellPartner = partner,
+                    TrackUnread = true,
                 };
                 tellTab.Add(message);
                 tabs.Add(tellTab);
@@ -138,6 +144,7 @@ public sealed class TabManager
                 Id = "tell:" + partner,
                 Title = partner.Split('@')[0],
                 TellPartner = partner,
+                TrackUnread = true,
             };
             tabs.Add(tellTab);
             return tellTab;

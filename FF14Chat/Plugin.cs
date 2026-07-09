@@ -41,6 +41,20 @@ public sealed class Plugin : IDalamudPlugin
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
+        // v1: unread badges became opt-in per tab; older saved configs need
+        // the FC tab flagged (tell tabs always track).
+        if (Configuration.Version < 1)
+        {
+            foreach (var tab in Configuration.Tabs)
+            {
+                if (tab.Name == "FC")
+                    tab.NotifyUnread = true;
+            }
+
+            Configuration.Version = 1;
+            Configuration.Save();
+        }
+
         MessageStore = new MessageStore();
         TabManager = new TabManager(Configuration);
 

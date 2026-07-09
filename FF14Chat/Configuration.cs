@@ -13,6 +13,9 @@ public class TabConfig
 
     /// <summary>Also receives non-combat messages no other tab matched.</summary>
     public bool CatchAll { get; set; }
+
+    /// <summary>Show an unread badge when messages arrive while unfocused.</summary>
+    public bool NotifyUnread { get; set; }
 }
 
 [Serializable]
@@ -33,6 +36,12 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Chat font size in px; must be a native Axis size (10, 12, 14, 18).</summary>
     public int FontSize { get; set; } = 12;
+
+    /// <summary>Softer, desaturated gold accents instead of the rich gold.</summary>
+    public bool MutedTheme { get; set; } = true;
+
+    /// <summary>Window background opacity (0.3 – 1.0).</summary>
+    public float BgOpacity { get; set; } = 0.78f;
 
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
 
@@ -61,6 +70,7 @@ public class Configuration : IPluginConfiguration
         {
             Name = "FC",
             Channels = [XivChatType.FreeCompany],
+            NotifyUnread = true,
         },
         new TabConfig
         {

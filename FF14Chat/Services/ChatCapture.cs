@@ -14,6 +14,11 @@ public sealed class ChatCapture : IDisposable
     private readonly TabManager tabs;
     private readonly MessageDatabase database;
 
+    private XivChatType lastType;
+    private string lastSender = string.Empty;
+    private string lastText = string.Empty;
+    private DateTime lastTimestamp;
+
     public ChatCapture(MessageStore store, TabManager tabs, MessageDatabase database)
     {
         this.store = store;
@@ -29,6 +34,25 @@ public sealed class ChatCapture : IDisposable
 
     private void OnChatMessage(IHandleableChatMessage chatMessage)
     {
+        // The chat event can fire more than once for a single message (e.g.
+        // one per vanilla panel displaying it); drop exact repeats arriving
+        // within a few hundred milliseconds.
+        var now = DateTime.Now;
+        var senderText = chatMessage.Sender.TextValue;
+        var messageText = chatMessage.Message.TextValue;
+        if (chatMessage.LogKind == lastType
+            && senderText == lastSender
+            && messageText == lastText
+            && (now - lastTimestamp).TotalMilliseconds < 300)
+        {
+            return;
+        }
+
+        lastType = chatMessage.LogKind;
+        lastSender = senderText;
+        lastText = messageText;
+        lastTimestamp = now;
+
         var senderPlayer = MessageParser.ExtractPlayer(chatMessage.Sender);
         var isTell = chatMessage.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing;
 
