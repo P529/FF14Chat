@@ -82,6 +82,16 @@ public class Configuration : IPluginConfiguration
         },
         new TabConfig
         {
+            Name = "Party",
+            Channels =
+            [
+                XivChatType.Party, XivChatType.CrossParty,
+                XivChatType.Alliance, XivChatType.PvPTeam,
+            ],
+            NotifyUnread = true,
+        },
+        new TabConfig
+        {
             Name = "FC",
             Channels = [XivChatType.FreeCompany],
             NotifyUnread = true,

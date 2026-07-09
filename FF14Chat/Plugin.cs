@@ -64,6 +64,29 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        // v3: a dedicated Party tab joined the defaults; older configs get it
+        // inserted after General unless they already have a party tab.
+        if (Configuration.Version < 3)
+        {
+            if (!Configuration.Tabs.Exists(t => t.Channels.Contains(Dalamud.Game.Text.XivChatType.Party) && !t.CatchAll && t.Name != "General"))
+            {
+                var index = Configuration.Tabs.FindIndex(t => t.Name == "General") + 1;
+                Configuration.Tabs.Insert(index, new TabConfig
+                {
+                    Name = "Party",
+                    Channels =
+                    [
+                        Dalamud.Game.Text.XivChatType.Party, Dalamud.Game.Text.XivChatType.CrossParty,
+                        Dalamud.Game.Text.XivChatType.Alliance, Dalamud.Game.Text.XivChatType.PvPTeam,
+                    ],
+                    NotifyUnread = true,
+                });
+            }
+
+            Configuration.Version = 3;
+            Configuration.Save();
+        }
+
         MessageStore = new MessageStore();
         TabManager = new TabManager(Configuration);
 
