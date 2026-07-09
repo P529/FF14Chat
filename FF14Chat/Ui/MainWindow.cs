@@ -15,6 +15,7 @@ using FF14Chat.Model;
 using FF14Chat.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Client.UI.Shell;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
@@ -728,23 +729,62 @@ public class MainWindow : Window, IDisposable
 
     private bool inputActiveLastFrame;
 
-    /// <summary>The log color of the channel plain text goes to in this tab, if fixed.</summary>
-    private static Vector4? SendChannelColor(TabState tab)
+    /// <summary>
+    /// The game's currently active input channel (what an untargeted message
+    /// would go to), as color + localized label from the chat log agent.
+    /// The numbering follows the game's input channels; ClientStructs only
+    /// names the first few, verified against Say/Party/Alliance.
+    /// </summary>
+    private static unsafe (Vector4 Color, string Label)? ActiveGameChannel()
+    {
+        var agent = AgentChatLog.Instance();
+        if (agent == null)
+            return null;
+
+        var type = (int)agent->CurrentChannel switch
+        {
+            0 => XivChatType.TellOutgoing,
+            1 => XivChatType.Say,
+            2 => XivChatType.Party,
+            3 => XivChatType.Alliance,
+            4 => XivChatType.Yell,
+            5 => XivChatType.Shout,
+            6 => XivChatType.FreeCompany,
+            7 => XivChatType.PvPTeam,
+            8 => XivChatType.NoviceNetwork,
+            // XivChatType linkshell values aren't contiguous (CWLS2+ live in a
+            // different range), but they all share one color anyway.
+            >= 9 and <= 16 => XivChatType.CrossLinkShell1,
+            >= 19 and <= 26 => XivChatType.Ls1,
+            _ => XivChatType.Say,
+        };
+
+        return (ChatColors.For(type), agent->ChannelLabel.ToString());
+    }
+
+    /// <summary>Destination color + label for plain text typed in this tab.</summary>
+    private static (Vector4 Color, string Label)? SendDestination(TabState tab)
     {
         if (tab.IsTell)
-            return ChatColors.For(XivChatType.TellOutgoing);
+            return (ChatColors.For(XivChatType.TellOutgoing), $"Tell {tab.Title}");
 
-        return tab.SendCommand switch
+        var fixedType = tab.SendCommand switch
         {
-            "/p" or "/party" => ChatColors.For(XivChatType.Party),
-            "/fc" or "/freecompany" => ChatColors.For(XivChatType.FreeCompany),
-            "/s" or "/say" => ChatColors.For(XivChatType.Say),
-            "/sh" or "/shout" => ChatColors.For(XivChatType.Shout),
-            "/y" or "/yell" => ChatColors.For(XivChatType.Yell),
-            "/a" or "/alliance" => ChatColors.For(XivChatType.Alliance),
-            "/n" or "/novice" => ChatColors.For(XivChatType.NoviceNetwork),
-            _ => null,
+            "/p" or "/party" => XivChatType.Party,
+            "/fc" or "/freecompany" => XivChatType.FreeCompany,
+            "/s" or "/say" => XivChatType.Say,
+            "/sh" or "/shout" => XivChatType.Shout,
+            "/y" or "/yell" => XivChatType.Yell,
+            "/a" or "/alliance" => XivChatType.Alliance,
+            "/n" or "/novice" => XivChatType.NoviceNetwork,
+            _ => (XivChatType?)null,
         };
+
+        if (fixedType is { } type)
+            return (ChatColors.For(type), tab.SendCommand!);
+
+        // No per-tab channel: plain text goes to the game's active channel.
+        return ActiveGameChannel();
     }
 
     private void DrawInput(TabState tab)
@@ -754,9 +794,9 @@ public class MainWindow : Window, IDisposable
 
         // While the field is focused, tint its border with the channel color
         // the message will be sent in, as a destination indicator.
-        var sendColor = SendChannelColor(tab);
+        var destination = SendDestination(tab);
         using var border = ImRaii.PushColor(
-            ImGuiCol.Border, sendColor.GetValueOrDefault(), inputActiveLastFrame && sendColor.HasValue);
+            ImGuiCol.Border, destination?.Color ?? default, inputActiveLastFrame && destination.HasValue);
 
         if (focusInput)
         {
@@ -772,7 +812,11 @@ public class MainWindow : Window, IDisposable
             }
         }
 
-        var hint = tab.IsTell ? $"Message {tab.Title}…" : "Chat or /command…";
+        var hint = tab.IsTell
+            ? $"Message {tab.Title}…"
+            : destination is { Label.Length: > 0 } dest
+                ? $"{dest.Label}…"
+                : "Chat or /command…";
         var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
         var submitted = ImGui.InputTextWithHint(
