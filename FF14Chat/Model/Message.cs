@@ -1,0 +1,16 @@
+using System;
+using Dalamud.Game.Text;
+
+namespace FF14Chat.Model;
+
+public sealed class Message
+{
+    public required DateTime Timestamp { get; init; }
+    public required XivChatType Type { get; init; }
+    public required string Sender { get; init; }
+    public required string Text { get; init; }
+
+    // Original SeString bytes, kept for link/color rendering (M6) and persistence (M5).
+    public required byte[] SenderRaw { get; init; }
+    public required byte[] MessageRaw { get; init; }
+}

@@ -3,6 +3,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using FF14Chat.Services;
 using FF14Chat.Ui;
 
 namespace FF14Chat;
@@ -20,15 +21,20 @@ public sealed class Plugin : IDalamudPlugin
     private const string CommandName = "/ff14chat";
 
     public Configuration Configuration { get; init; }
+    public MessageStore MessageStore { get; init; }
 
     public readonly WindowSystem WindowSystem = new("FF14Chat");
+    private ChatCapture ChatCapture { get; init; }
     private MainWindow MainWindow { get; init; }
 
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
-        MainWindow = new MainWindow(this);
+        MessageStore = new MessageStore();
+        ChatCapture = new ChatCapture(MessageStore);
+
+        MainWindow = new MainWindow(this, MessageStore);
         WindowSystem.AddWindow(MainWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -47,6 +53,7 @@ public sealed class Plugin : IDalamudPlugin
 
         WindowSystem.RemoveAllWindows();
         MainWindow.Dispose();
+        ChatCapture.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
     }
