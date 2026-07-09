@@ -733,8 +733,8 @@ public class MainWindow : Window, IDisposable
     // Say -> Party -> Alliance -> FC, the useful everyday rotation.
     private static readonly int[] ChannelCycle = [1, 2, 3, 6];
 
-    /// <summary>Switches the game's active input channel to the next in the cycle.</summary>
-    private unsafe void CycleGameChannel()
+    /// <summary>Switches the game's active input channel to the next/previous in the cycle.</summary>
+    private unsafe void CycleGameChannel(int direction)
     {
         var agent = AgentChatLog.Instance();
         var shell = RaptureShellModule.Instance();
@@ -742,7 +742,7 @@ public class MainWindow : Window, IDisposable
             return;
 
         var index = Array.IndexOf(ChannelCycle, (int)agent->CurrentChannel);
-        var next = ChannelCycle[(index + 1) % ChannelCycle.Length];
+        var next = ChannelCycle[(index + direction + ChannelCycle.Length) % ChannelCycle.Length];
 
         var empty = Utf8String.FromString(string.Empty);
         try
@@ -755,14 +755,14 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    private void SwitchToNextTab(TabState current)
+    private void SwitchToNextTab(TabState current, int direction)
     {
         var all = tabs.Snapshot();
         if (all.Length < 2)
             return;
 
         var index = Array.FindIndex(all, t => t.Id == current.Id);
-        selectTabId = all[(index + 1 + all.Length) % all.Length].Id;
+        selectTabId = all[(index + direction + all.Length) % all.Length].Id;
         focusInput = true;
     }
 
@@ -970,10 +970,12 @@ public class MainWindow : Window, IDisposable
         {
             if (data.BufTextLen == 0)
             {
+                // Shift+Tab cycles backwards.
+                var direction = ImGui.GetIO().KeyShift ? -1 : 1;
                 if (inputTab is { } current && (current.IsTell || current.SendCommand is { Length: > 0 }))
-                    SwitchToNextTab(current);
+                    SwitchToNextTab(current, direction);
                 else
-                    CycleGameChannel();
+                    CycleGameChannel(direction);
 
                 return 0;
             }
