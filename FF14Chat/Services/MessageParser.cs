@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
+using Dalamud.Utility;
 using FF14Chat.Model;
+using Lumina.Excel.Sheets;
 
 namespace FF14Chat.Services;
 
@@ -37,7 +39,7 @@ public static class MessageParser
 
                 case ItemPayload ip:
                     link = ip;
-                    linkName = ip.DisplayName;
+                    linkName = ResolveItemName(ip);
                     break;
 
                 // Link payloads end with a raw terminator payload.
@@ -66,6 +68,20 @@ public static class MessageParser
         }
 
         return segments;
+    }
+
+    private static string? ResolveItemName(ItemPayload ip)
+    {
+        if (ip.Kind == ItemKind.EventItem)
+        {
+            return Plugin.DataManager.GetExcelSheet<EventItem>().TryGetRow(ip.ItemId, out var eventItem)
+                ? eventItem.Name.ExtractText()
+                : ip.DisplayName;
+        }
+
+        return Plugin.DataManager.GetExcelSheet<Item>().TryGetRow(ip.ItemId, out var item)
+            ? item.Name.ExtractText()
+            : ip.DisplayName;
     }
 
     private static Vector4 RgbaToVector(uint rgba) => new(

@@ -99,6 +99,11 @@ Data flow: `IChatGui.ChatMessage` → `ChatCapture` normalizes into `Message` �
 - Auto-translate payload rendering (the ⟨⟩ brackets).
 - **Done when:** a linked item in chat is visually distinct and clickable.
 
+### M6.5 — FFXIV-native theming (user requirement, before "final")
+- The window must look like a Final Fantasy XIV window, not default ImGui: dark translucent panel, FFXIV-style borders/corners, matching fonts and spacing.
+- Approach: dedicated ImGui style push (colors, rounding, borders) around the whole window; optionally draw the game's own window frame textures (ULD assets via ITextureProvider) behind the content like some plugins do.
+- Titlebar-less "locked" chat look with a subtle resize grip, matching vanilla chat's feel.
+
 ### M7 — v2 / polish backlog (unordered)
 - Hide vanilla chat log (`AddonChatLog` visibility) + capture Enter to focus this window.
 - Player-name autocomplete (party, FC, recent tells, nearby objects).
