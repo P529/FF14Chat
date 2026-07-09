@@ -61,7 +61,7 @@ public class SettingsWindow : Window, IDisposable
 
         var themeIndex = config.Theme;
         ImGui.SetNextItemWidth(160f);
-        if (ImGui.Combo("Theme", ref themeIndex, ["Muted Gold", "Rich Gold", "Classic Blue"], 3))
+        if (ImGui.Combo("Theme", ref themeIndex, ["Muted Gold", "Rich Gold", "Classic Blue", "FF7 Remake"], 4))
         {
             config.Theme = themeIndex;
             config.Save();

@@ -10,6 +10,7 @@ public enum ChatTheme
     MutedGold = 0,
     RichGold = 1,
     ClassicBlue = 2,
+    Ff7Remake = 3,
 }
 
 [Serializable]
