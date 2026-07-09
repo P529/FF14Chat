@@ -50,6 +50,7 @@ public sealed class MessageDatabase : IDisposable
         }
 
         Prune();
+        PurgeBattleSpam();
 
         writer = Task.Run(WriteLoop);
     }
@@ -193,5 +194,24 @@ public sealed class MessageDatabase : IDisposable
         command.Parameters.AddWithValue(
             "@cutoff", DateTimeOffset.UtcNow.AddDays(-RetentionDays).ToUnixTimeMilliseconds());
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Battle log rows are no longer captured; clear out what older versions
+    /// persisted (they were ~85% of the file) and reclaim the space once.
+    /// </summary>
+    private void PurgeBattleSpam()
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM messages WHERE (type & 0x7F) BETWEEN 41 AND 55";
+        var removed = command.ExecuteNonQuery();
+
+        if (removed > 0)
+        {
+            Plugin.Log.Information("Purged {Count} battle log rows from chat history", removed);
+            using var vacuum = connection.CreateCommand();
+            vacuum.CommandText = "VACUUM";
+            vacuum.ExecuteNonQuery();
+        }
     }
 }

@@ -48,6 +48,11 @@ public sealed class ChatCapture : IDisposable
         if (now - gameTimestamp > TimeSpan.FromMinutes(2))
             return;
 
+        // Battle spam is never displayed and would crowd chat out of both
+        // the in-memory ring and the hydration window.
+        if (ChatTypes.IsBattleSpam(chatMessage.LogKind))
+            return;
+
         var senderText = chatMessage.Sender.TextValue;
         var messageText = chatMessage.Message.TextValue;
         if (chatMessage.LogKind == lastType

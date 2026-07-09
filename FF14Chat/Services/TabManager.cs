@@ -159,8 +159,8 @@ public sealed class TabManager
 
             // Unclassified non-combat messages (join notices, obtain lines,
             // unnamed system kinds) land in the catch-all tab. Combat kinds
-            // (masked 41..55) stay out to avoid battle spam.
-            if (!anyFixedMatch && (ushort)masked is < 41 or > 55)
+            // stay out (also guards old persisted rows during hydration).
+            if (!anyFixedMatch && !ChatTypes.IsBattleSpam(message.Type))
             {
                 foreach (var tab in tabs)
                 {
