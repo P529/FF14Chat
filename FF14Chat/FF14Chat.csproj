@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.0.1.0</Version>
+    <Description>Chat replacement: tabbed chat with per-person tell tabs, command autocompletion, persistent history.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

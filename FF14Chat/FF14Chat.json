@@ -1,0 +1,12 @@
+{
+  "Author": "ismog",
+  "Name": "FF14Chat",
+  "Punchline": "Tabbed chat replacement with tell tabs and command autocompletion.",
+  "Description": "A chat replacement window: configurable tabs, a separate tab per tell conversation, command autocompletion, and persistent chat history. Toggle with /ff14chat.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "chat",
+    "ui",
+    "tabs"
+  ]
+}
