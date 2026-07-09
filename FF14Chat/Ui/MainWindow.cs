@@ -285,10 +285,13 @@ public class MainWindow : Window, IDisposable
         ImGui.SetNextWindowPos(new Vector2(inputPos.X, inputPos.Y - height - 4));
         ImGui.SetNextWindowSize(new Vector2(width, height));
 
+        // The Tooltip flag moves the window to the tooltip z-layer so it always
+        // draws above the chat window; unlike BeginTooltip it stays clickable.
         const ImGuiWindowFlags flags =
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove
             | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNavFocus
-            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar;
+            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar
+            | ImGuiWindowFlags.Tooltip;
 
         // Drawn as an overlay window so it can float above the input.
         if (!ImGui.Begin("##ff14chat-suggestions", flags))
