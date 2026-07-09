@@ -59,10 +59,11 @@ public class SettingsWindow : Window, IDisposable
             mainWindow.RebuildFont();
         }
 
-        var mutedTheme = config.MutedTheme;
-        if (ImGui.Checkbox("Muted theme (softer gold)", ref mutedTheme))
+        var themeIndex = config.Theme;
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.Combo("Theme", ref themeIndex, ["Muted Gold", "Rich Gold", "Classic Blue"], 3))
         {
-            config.MutedTheme = mutedTheme;
+            config.Theme = themeIndex;
             config.Save();
         }
 

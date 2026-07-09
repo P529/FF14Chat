@@ -5,6 +5,13 @@ using Dalamud.Game.Text;
 
 namespace FF14Chat;
 
+public enum ChatTheme
+{
+    MutedGold = 0,
+    RichGold = 1,
+    ClassicBlue = 2,
+}
+
 [Serializable]
 public class TabConfig
 {
@@ -34,11 +41,17 @@ public class Configuration : IPluginConfiguration
     /// <summary>One-shot: window was initially placed over the vanilla chat.</summary>
     public bool PlacedAtVanillaChat { get; set; }
 
+    /// <summary>Display order of tabs by tab id; unknown ids keep their position.</summary>
+    public List<string> TabOrder { get; set; } = [];
+
     /// <summary>Chat font size in px; must be a native Axis size (10, 12, 14, 18).</summary>
     public int FontSize { get; set; } = 12;
 
-    /// <summary>Softer, desaturated gold accents instead of the rich gold.</summary>
+    /// <summary>Legacy pre-v2 flag; superseded by <see cref="Theme"/>.</summary>
     public bool MutedTheme { get; set; } = true;
+
+    /// <summary>Active theme, see <see cref="ChatTheme"/>.</summary>
+    public int Theme { get; set; } = (int)ChatTheme.MutedGold;
 
     /// <summary>Window background opacity (0.3 – 1.0).</summary>
     public float BgOpacity { get; set; } = 0.78f;

@@ -44,6 +44,7 @@ public sealed class MessageDatabase : IDisposable
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
                 CREATE INDEX IF NOT EXISTS idx_messages_partner ON messages(tell_partner, ts);
+                PRAGMA journal_size_limit=8388608;
                 """;
             command.ExecuteNonQuery();
         }
@@ -59,41 +60,49 @@ public sealed class MessageDatabase : IDisposable
             queue.Add(message);
     }
 
-    /// <summary>Loads the most recent messages in chronological order. Startup only.</summary>
-    public List<Message> LoadRecent(int limit)
+    /// <summary>
+    /// Loads history for startup hydration in chronological order: a recent
+    /// window of everything plus a deeper window of tells, so busy system
+    /// spam cannot push conversations out of range. Startup only.
+    /// </summary>
+    public List<Message> LoadForHydration(int recentLimit, int tellLimit)
     {
-        var result = new List<Message>();
+        var byId = new SortedDictionary<long, Message>();
+        Collect(byId, "SELECT id, ts, type, sender, text, tell_partner, sender_raw, message_raw FROM messages ORDER BY id DESC LIMIT @limit", recentLimit);
+        Collect(byId, "SELECT id, ts, type, sender, text, tell_partner, sender_raw, message_raw FROM messages WHERE tell_partner IS NOT NULL ORDER BY id DESC LIMIT @limit", tellLimit);
+        return [.. byId.Values];
+    }
 
+    private void Collect(SortedDictionary<long, Message> byId, string sql, int limit)
+    {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT ts, type, sender, text, tell_partner, sender_raw, message_raw
-            FROM messages ORDER BY id DESC LIMIT @limit
-            """;
+        command.CommandText = sql;
         command.Parameters.AddWithValue("@limit", limit);
 
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var senderRaw = reader.GetFieldValue<byte[]>(5);
-            var messageRaw = reader.GetFieldValue<byte[]>(6);
+            var id = reader.GetInt64(0);
+            if (byId.ContainsKey(id))
+                continue;
+
+            var senderRaw = reader.GetFieldValue<byte[]>(6);
+            var messageRaw = reader.GetFieldValue<byte[]>(7);
             var parsed = SeString.Parse(messageRaw);
 
-            result.Add(new Message
+            byId[id] = new Message
             {
-                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)).LocalDateTime,
-                Type = (XivChatType)reader.GetInt32(1),
-                Sender = reader.GetString(2),
-                Text = reader.GetString(3),
-                TellPartner = reader.IsDBNull(4) ? null : reader.GetString(4),
+                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)).LocalDateTime,
+                Type = (XivChatType)reader.GetInt32(2),
+                Sender = reader.GetString(3),
+                Text = reader.GetString(4),
+                TellPartner = reader.IsDBNull(5) ? null : reader.GetString(5),
                 SenderRaw = senderRaw,
                 MessageRaw = messageRaw,
                 Segments = MessageParser.Parse(parsed),
                 SenderPlayer = MessageParser.ExtractPlayer(SeString.Parse(senderRaw)),
-            });
+            };
         }
-
-        result.Reverse();
-        return result;
     }
 
     public void Dispose()

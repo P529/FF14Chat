@@ -296,12 +296,17 @@ public class MainWindow : Window, IDisposable
         if (focusInput)
             ImGui.SetWindowFocus();
 
-        using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable);
+        // Reordering is handled manually (ImGui's Reorderable flag never
+        // persists its order), see HandleTabReorder.
+        using var tabBar = ImRaii.TabBar("##tabs");
         if (!tabBar.Success)
             return;
 
-        foreach (var tab in tabs.Snapshot())
+        var tabList = tabs.Snapshot();
+        for (var i = 0; i < tabList.Length; i++)
         {
+            var tab = tabList[i];
+
             // Constant label (badge drawn as an overlay) so tab widths never
             // jump when unread counts appear and disappear. The trailing
             // spaces reserve room for the badge.
@@ -314,6 +319,7 @@ public class MainWindow : Window, IDisposable
                 using (var item = ImRaii.TabItem(label, ref open, itemFlags))
                 {
                     DrawUnreadBadge(tab);
+                    HandleTabReorder(tab, i, tabList.Length);
                     if (item.Success)
                         DrawTab(tab);
                 }
@@ -325,12 +331,33 @@ public class MainWindow : Window, IDisposable
             {
                 using var item = ImRaii.TabItem(label);
                 DrawUnreadBadge(tab);
+                HandleTabReorder(tab, i, tabList.Length);
                 if (item.Success)
                     DrawTab(tab);
             }
         }
 
         selectTabId = null;
+    }
+
+    /// <summary>
+    /// Drag-to-reorder for the tab header (the last ImGui item): once the
+    /// pointer leaves the held tab sideways, swap it with its neighbor and
+    /// persist the new order.
+    /// </summary>
+    private void HandleTabReorder(TabState tab, int index, int count)
+    {
+        if (!ImGui.IsItemActive() || ImGui.IsItemHovered())
+            return;
+
+        var mouseX = ImGui.GetMousePos().X;
+        var min = ImGui.GetItemRectMin().X;
+        var max = ImGui.GetItemRectMax().X;
+
+        if (mouseX < min && index > 0)
+            tabs.Move(tab, index - 1);
+        else if (mouseX > max && index < count - 1)
+            tabs.Move(tab, index + 1);
     }
 
     /// <summary>Places the window over the vanilla chat log, once, on first load.</summary>

@@ -49,9 +49,12 @@ public sealed class TabManager
 {
     private readonly object gate = new();
     private readonly List<TabState> tabs = [];
+    private readonly Configuration configuration;
 
     public TabManager(Configuration configuration)
     {
+        this.configuration = configuration;
+
         foreach (var tabConfig in configuration.Tabs)
         {
             tabs.Add(new TabState
@@ -63,6 +66,47 @@ public sealed class TabManager
                 TrackUnread = tabConfig.NotifyUnread,
             });
         }
+
+        ApplySavedOrder();
+    }
+
+    /// <summary>Reorders tabs to match the saved order; unknown ids keep their position at the end.</summary>
+    public void ApplySavedOrder()
+    {
+        lock (gate)
+        {
+            var order = configuration.TabOrder;
+            if (order.Count == 0)
+                return;
+
+            var sorted = tabs
+                .OrderBy(t =>
+                {
+                    var index = order.IndexOf(t.Id);
+                    return index < 0 ? int.MaxValue : index;
+                })
+                .ToList();
+            tabs.Clear();
+            tabs.AddRange(sorted);
+        }
+    }
+
+    /// <summary>Moves a tab to a new index and persists the order.</summary>
+    public void Move(TabState tab, int newIndex)
+    {
+        lock (gate)
+        {
+            var oldIndex = tabs.IndexOf(tab);
+            if (oldIndex < 0 || newIndex < 0 || newIndex >= tabs.Count || oldIndex == newIndex)
+                return;
+
+            tabs.RemoveAt(oldIndex);
+            tabs.Insert(newIndex, tab);
+
+            configuration.TabOrder = [.. tabs.Select(t => t.Id)];
+        }
+
+        configuration.Save();
     }
 
     public void Route(Message message)

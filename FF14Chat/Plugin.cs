@@ -25,7 +25,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private const string CommandName = "/ff14chat";
 
-    private const int HydrateLimit = 1000;
+    private const int HydrateRecentLimit = 5000;
+    private const int HydrateTellLimit = 2000;
 
     public Configuration Configuration { get; init; }
     public MessageStore MessageStore { get; init; }
@@ -52,6 +53,14 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             Configuration.Version = 1;
+            Configuration.Save();
+        }
+
+        // v2: the muted flag became a theme choice.
+        if (Configuration.Version < 2)
+        {
+            Configuration.Theme = (int)(Configuration.MutedTheme ? ChatTheme.MutedGold : ChatTheme.RichGold);
+            Configuration.Version = 2;
             Configuration.Save();
         }
 
@@ -98,7 +107,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
-            foreach (var message in Database.LoadRecent(HydrateLimit))
+            foreach (var message in Database.LoadForHydration(HydrateRecentLimit, HydrateTellLimit))
             {
                 MessageStore.Add(message);
                 TabManager.Route(message);
@@ -109,9 +118,11 @@ public sealed class Plugin : IDalamudPlugin
             Log.Error(e, "Failed to load chat history");
         }
 
-        // Restored history is not new.
+        // Restored history is not new, and restored tell tabs should sit
+        // where the user left them.
         foreach (var tab in TabManager.Snapshot())
             TabManager.MarkRead(tab);
+        TabManager.ApplySavedOrder();
     }
 
     private void OnCommand(string command, string args) => MainWindow.Toggle();
