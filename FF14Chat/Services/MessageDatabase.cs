@@ -74,6 +74,7 @@ public sealed class MessageDatabase : IDisposable
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
+            var senderRaw = reader.GetFieldValue<byte[]>(5);
             var messageRaw = reader.GetFieldValue<byte[]>(6);
             var parsed = SeString.Parse(messageRaw);
 
@@ -84,9 +85,10 @@ public sealed class MessageDatabase : IDisposable
                 Sender = reader.GetString(2),
                 Text = reader.GetString(3),
                 TellPartner = reader.IsDBNull(4) ? null : reader.GetString(4),
-                SenderRaw = reader.GetFieldValue<byte[]>(5),
+                SenderRaw = senderRaw,
                 MessageRaw = messageRaw,
                 Segments = MessageParser.Parse(parsed),
+                SenderPlayer = MessageParser.ExtractPlayer(SeString.Parse(senderRaw)),
             });
         }
 

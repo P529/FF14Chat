@@ -124,6 +124,26 @@ public sealed class TabManager
         }
     }
 
+    /// <summary>Returns the tell tab for a partner, creating an empty one if needed.</summary>
+    public TabState OpenTellTab(string partner)
+    {
+        lock (gate)
+        {
+            var existing = tabs.FirstOrDefault(t => t.TellPartner == partner);
+            if (existing != null)
+                return existing;
+
+            var tellTab = new TabState
+            {
+                Id = "tell:" + partner,
+                Title = partner.Split('@')[0],
+                TellPartner = partner,
+            };
+            tabs.Add(tellTab);
+            return tellTab;
+        }
+    }
+
     public void MarkRead(TabState tab)
     {
         lock (gate)

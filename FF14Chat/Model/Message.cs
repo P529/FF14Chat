@@ -15,6 +15,9 @@ public sealed class Message
     /// <summary>"Name@World" of the other party for tells, null otherwise.</summary>
     public string? TellPartner { get; init; }
 
+    /// <summary>"Name@World" of the sending player when resolvable, null otherwise.</summary>
+    public string? SenderPlayer { get; init; }
+
     // Original SeString bytes, kept for link/color rendering (M6) and persistence (M5).
     public required byte[] SenderRaw { get; init; }
     public required byte[] MessageRaw { get; init; }

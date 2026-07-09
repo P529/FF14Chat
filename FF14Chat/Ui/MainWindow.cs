@@ -35,6 +35,8 @@ public class MainWindow : Window, IDisposable
     private int suggestionIndex;
     private string suggestionQuery = string.Empty;
 
+    private string? selectTabId;
+
     private bool enterWasDown;
     private bool slashWasDown;
     private bool pendingSlash;
@@ -157,10 +159,12 @@ public class MainWindow : Window, IDisposable
                 ? $"★ {tab.Title} ({tab.Unread})###{tab.Id}"
                 : $"{tab.Title}###{tab.Id}";
 
+            var itemFlags = selectTabId == tab.Id ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+
             if (tab.IsTell)
             {
                 var open = true;
-                using var item = ImRaii.TabItem(label, ref open);
+                using var item = ImRaii.TabItem(label, ref open, itemFlags);
                 if (item.Success)
                     DrawTab(tab);
                 if (!open)
@@ -173,6 +177,8 @@ public class MainWindow : Window, IDisposable
                     DrawTab(tab);
             }
         }
+
+        selectTabId = null;
     }
 
     private void DrawTab(TabState tab)
@@ -426,7 +432,7 @@ public class MainWindow : Window, IDisposable
         return true;
     }
 
-    private static void DrawMessage(Message message)
+    private void DrawMessage(Message message)
     {
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
         {
@@ -437,12 +443,17 @@ public class MainWindow : Window, IDisposable
 
         var prefix = FormatPrefix(message);
         if (prefix.Length > 0)
-            DrawSegmentText(prefix + " ", channelColor, null);
+        {
+            var senderLink = message.SenderPlayer != null
+                ? new SegmentLink.Player(message.SenderPlayer)
+                : null;
+            DrawSegmentText(prefix + " ", channelColor, senderLink);
+        }
 
         if (message.Segments.Count > 0)
         {
             foreach (var segment in message.Segments)
-                DrawSegmentText(segment.Text, segment.Color ?? channelColor, segment);
+                DrawSegmentText(segment.Text, segment.Color ?? channelColor, segment.Link);
         }
         else
         {
@@ -455,7 +466,7 @@ public class MainWindow : Window, IDisposable
     /// window edge. Assumes the previous ImGui item is the preceding chunk of
     /// this same line (the timestamp starts every line).
     /// </summary>
-    private static void DrawSegmentText(string text, Vector4 color, MessageSegment? segment)
+    private void DrawSegmentText(string text, Vector4 color, SegmentLink? link)
     {
         using var c = ImRaii.PushColor(ImGuiCol.Text, color);
 
@@ -465,13 +476,13 @@ public class MainWindow : Window, IDisposable
             var forceNewLine = li > 0;
             foreach (var token in Tokenize(lines[li]))
             {
-                DrawToken(token, segment, forceNewLine);
+                DrawToken(token, link, forceNewLine);
                 forceNewLine = false;
             }
         }
     }
 
-    private static void DrawToken(string token, MessageSegment? segment, bool forceNewLine)
+    private void DrawToken(string token, SegmentLink? link, bool forceNewLine)
     {
         if (!forceNewLine)
         {
@@ -484,12 +495,51 @@ public class MainWindow : Window, IDisposable
 
         ImGui.TextUnformatted(token);
 
-        if (segment is { ItemId: not null } && ImGui.IsItemHovered())
+        if (link == null || !ImGui.IsItemHovered())
+            return;
+
+        ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        var clicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
+
+        switch (link)
         {
-            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-            var name = segment.ItemName ?? $"Item #{segment.ItemId}";
-            ImGui.SetTooltip(segment.ItemHq ? $"{name} " : name);
+            case SegmentLink.Item item:
+                var name = item.Name ?? $"Item #{item.ItemId}";
+                ImGui.SetTooltip($"{name}{(item.Hq ? " " : "")}\nClick: copy name");
+                if (clicked)
+                {
+                    ImGui.SetClipboardText(name);
+                    Notify($"Copied \"{name}\"");
+                }
+
+                break;
+
+            case SegmentLink.Map map:
+                ImGui.SetTooltip("Click: open map");
+                if (clicked)
+                    Plugin.GameGui.OpenMapWithMapLink(map.Payload);
+                break;
+
+            case SegmentLink.Player player:
+                ImGui.SetTooltip($"{player.Partner}\nClick: open tell tab");
+                if (clicked)
+                {
+                    var tellTab = tabs.OpenTellTab(player.Partner);
+                    selectTabId = tellTab.Id;
+                    focusInput = true;
+                }
+
+                break;
         }
+    }
+
+    private static void Notify(string content)
+    {
+        Plugin.Notifications.AddNotification(new Dalamud.Interface.ImGuiNotification.Notification
+        {
+            Content = content,
+            Minimized = true,
+        });
     }
 
     /// <summary>Splits a line into words, each keeping its trailing spaces.</summary>

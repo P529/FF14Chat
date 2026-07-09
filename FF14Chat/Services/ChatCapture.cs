@@ -29,6 +29,9 @@ public sealed class ChatCapture : IDisposable
 
     private void OnChatMessage(IHandleableChatMessage chatMessage)
     {
+        var senderPlayer = MessageParser.ExtractPlayer(chatMessage.Sender);
+        var isTell = chatMessage.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing;
+
         var message = new Message
         {
             Timestamp = DateTime.Now,
@@ -38,32 +41,14 @@ public sealed class ChatCapture : IDisposable
             Segments = MessageParser.Parse(chatMessage.Message),
             SenderRaw = chatMessage.Sender.Encode(),
             MessageRaw = chatMessage.Message.Encode(),
-            TellPartner = ExtractTellPartner(chatMessage.LogKind, chatMessage.Sender),
+            SenderPlayer = senderPlayer,
+            // For tells, the sender field holds the other party (the
+            // recipient for outgoing tells).
+            TellPartner = isTell ? senderPlayer ?? chatMessage.Sender.TextValue : null,
         };
 
         store.Add(message);
         tabs.Route(message);
         database.Enqueue(message);
-    }
-
-    /// <summary>
-    /// For tells, the sender field holds the other party (the recipient for
-    /// outgoing tells). Prefer the player payload, which carries the world.
-    /// </summary>
-    private static string? ExtractTellPartner(XivChatType type, SeString sender)
-    {
-        if (type is not (XivChatType.TellIncoming or XivChatType.TellOutgoing))
-            return null;
-
-        foreach (var payload in sender.Payloads)
-        {
-            if (payload is PlayerPayload player)
-            {
-                var world = player.World.ValueNullable?.Name.ExtractText();
-                return world is { Length: > 0 } ? $"{player.PlayerName}@{world}" : player.PlayerName;
-            }
-        }
-
-        return sender.TextValue;
     }
 }
