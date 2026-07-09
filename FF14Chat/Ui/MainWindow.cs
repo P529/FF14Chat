@@ -924,7 +924,9 @@ public class MainWindow : Window, IDisposable
             ? text
             : tab.IsTell
                 ? $"/tell {tab.TellPartner} {text}"
-                : text;
+                : tab.SendCommand is { Length: > 0 } sendCommand
+                    ? $"{sendCommand} {text}"
+                    : text;
 
         if (!ChatSender.Send(toSend))
             return false;

@@ -21,6 +21,9 @@ public sealed class TabState
     /// <summary>Whether arriving messages increment the unread badge.</summary>
     public bool TrackUnread { get; init; }
 
+    /// <summary>Chat command plain text is sent through (e.g. "/p"); null = active channel.</summary>
+    public string? SendCommand { get; init; }
+
     /// <summary>"Name@World" for tell tabs; null for fixed tabs.</summary>
     public string? TellPartner { get; init; }
 
@@ -66,6 +69,7 @@ public sealed class TabManager
                 Channels = [.. tabConfig.Channels],
                 CatchAll = tabConfig.CatchAll,
                 TrackUnread = tabConfig.NotifyUnread,
+                SendCommand = tabConfig.SendCommand,
             });
         }
 

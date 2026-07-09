@@ -29,6 +29,12 @@ public class TabConfig
 
     /// <summary>Show an unread badge when messages arrive while unfocused.</summary>
     public bool NotifyUnread { get; set; }
+
+    /// <summary>
+    /// Chat command plain text is sent through in this tab (e.g. "/p").
+    /// Null sends to the game's currently active channel.
+    /// </summary>
+    public string? SendCommand { get; set; }
 }
 
 [Serializable]
@@ -101,12 +107,14 @@ public class Configuration : IPluginConfiguration
                 XivChatType.Alliance, XivChatType.PvPTeam,
             ],
             NotifyUnread = true,
+            SendCommand = "/p",
         },
         new TabConfig
         {
             Name = "FC",
             Channels = [XivChatType.FreeCompany],
             NotifyUnread = true,
+            SendCommand = "/fc",
         },
         new TabConfig
         {

@@ -113,6 +113,23 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        // v5: tabs gained a send channel; wire up the stock Party/FC tabs.
+        if (Configuration.Version < 5)
+        {
+            foreach (var tab in Configuration.Tabs)
+            {
+                tab.SendCommand ??= tab.Name switch
+                {
+                    "Party" => "/p",
+                    "FC" => "/fc",
+                    _ => null,
+                };
+            }
+
+            Configuration.Version = 5;
+            Configuration.Save();
+        }
+
         MessageStore = new MessageStore();
         TabManager = new TabManager(Configuration, MessageStore);
 
