@@ -155,6 +155,7 @@ public class MainWindow : Window, IDisposable
             ? BaseFlags | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize
             : BaseFlags;
 
+        FFTheme.Configure(plugin.Configuration);
         themeColors = FFTheme.PushColors();
         themeStyles = FFTheme.PushStyles();
         if (gameFont.Available)

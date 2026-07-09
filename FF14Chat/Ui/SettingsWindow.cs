@@ -30,6 +30,7 @@ public class SettingsWindow : Window, IDisposable
 
     public override void PreDraw()
     {
+        FFTheme.Configure(plugin.Configuration);
         themeColors = FFTheme.PushColors();
         themeStyles = FFTheme.PushStyles();
     }
@@ -56,6 +57,21 @@ public class SettingsWindow : Window, IDisposable
             config.FontSize = FontSizes[sizeIndex];
             config.Save();
             mainWindow.RebuildFont();
+        }
+
+        var mutedTheme = config.MutedTheme;
+        if (ImGui.Checkbox("Muted theme (softer gold)", ref mutedTheme))
+        {
+            config.MutedTheme = mutedTheme;
+            config.Save();
+        }
+
+        var bgOpacity = config.BgOpacity;
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.SliderFloat("Background opacity", ref bgOpacity, 0.3f, 1f, "%.2f"))
+        {
+            config.BgOpacity = bgOpacity;
+            config.Save();
         }
 
         var hideVanilla = config.HideVanillaChat;

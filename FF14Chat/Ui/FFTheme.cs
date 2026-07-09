@@ -10,22 +10,41 @@ namespace FF14Chat.Ui;
 /// </summary>
 public static class FFTheme
 {
-    // Palette sampled from the vanilla UI.
-    public static readonly Vector4 Gold = new(0.784f, 0.667f, 0.431f, 1f);        // #C8AA6E
-    public static readonly Vector4 GoldBright = new(0.910f, 0.835f, 0.628f, 1f);  // #E8D5A0
-    public static readonly Vector4 TextWarm = new(0.910f, 0.886f, 0.816f, 1f);    // #E8E2D0
-    public static readonly Vector4 TextDim = new(0.651f, 0.631f, 0.565f, 1f);     // #A6A190
+    private static bool muted = true;
+    private static float opacity = 0.78f;
 
-    public static readonly Vector4 BgBottom = new(0.078f, 0.078f, 0.098f, 0.945f); // #14141A
-    public static readonly Vector4 BgSheen = new(0.216f, 0.216f, 0.271f, 0.55f);   // #373745 fading down
+    /// <summary>Call once per frame before pushing colors, from PreDraw.</summary>
+    public static void Configure(Configuration config)
+    {
+        muted = config.MutedTheme;
+        opacity = System.Math.Clamp(config.BgOpacity, 0.3f, 1f);
+    }
 
-    private static readonly Vector4 FrameBg = new(0.055f, 0.055f, 0.075f, 0.90f);
-    private static readonly Vector4 FrameBgHover = new(0.100f, 0.100f, 0.130f, 0.95f);
-    private static readonly Vector4 FrameBgActive = new(0.120f, 0.120f, 0.155f, 1f);
-    private static readonly Vector4 TabIdle = new(0.130f, 0.130f, 0.165f, 0.85f);
-    private static readonly Vector4 TabHover = new(0.230f, 0.225f, 0.270f, 1f);
-    private static readonly Vector4 TabSelected = new(0.265f, 0.255f, 0.300f, 1f);
-    private static readonly Vector4 PanelBg = new(0.100f, 0.100f, 0.128f, 0.96f);
+    // Palette sampled from the vanilla UI; the muted variant desaturates the
+    // gold toward parchment gray and softens contrast.
+    public static Vector4 Gold => muted
+        ? new Vector4(0.640f, 0.600f, 0.505f, 1f)   // #A3997F
+        : new Vector4(0.784f, 0.667f, 0.431f, 1f);  // #C8AA6E
+
+    public static Vector4 GoldBright => muted
+        ? new Vector4(0.800f, 0.770f, 0.680f, 1f)   // #CCC4AD
+        : new Vector4(0.910f, 0.835f, 0.628f, 1f);  // #E8D5A0
+
+    public static Vector4 TextWarm => new(0.900f, 0.885f, 0.835f, 1f);
+    public static Vector4 TextDim => new(0.630f, 0.615f, 0.560f, 1f);
+
+    public static Vector4 BgBottom => new(0.078f, 0.078f, 0.098f, opacity);
+    public static Vector4 BgSheen => new(0.216f, 0.216f, 0.271f, (muted ? 0.30f : 0.55f) * opacity);
+
+    private static float BorderAlpha => muted ? 0.40f : 0.55f;
+
+    private static Vector4 FrameBg => new(0.055f, 0.055f, 0.075f, muted ? 0.70f : 0.90f);
+    private static Vector4 FrameBgHover => new(0.100f, 0.100f, 0.130f, muted ? 0.80f : 0.95f);
+    private static Vector4 FrameBgActive => new(0.120f, 0.120f, 0.155f, muted ? 0.90f : 1f);
+    private static Vector4 TabIdle => new(0.130f, 0.130f, 0.165f, muted ? 0.55f : 0.85f);
+    private static Vector4 TabHover => new(0.230f, 0.225f, 0.270f, muted ? 0.85f : 1f);
+    private static Vector4 TabSelected => new(0.265f, 0.255f, 0.300f, muted ? 0.90f : 1f);
+    private static Vector4 PanelBg => new(0.100f, 0.100f, 0.128f, 0.96f);
 
     public static ImRaii.ColorDisposable PushColors() => ImRaii.PushColor(ImGuiCol.Text, TextWarm)
         .Push(ImGuiCol.TextDisabled, TextDim)
@@ -91,7 +110,7 @@ public static class FFTheme
             sheenTop, sheenTop, 0, 0);
 
         // Outer gold hairline plus an inner dark line for the embossed look.
-        drawList.AddRect(pos, pos + size, ImGui.GetColorU32(Gold with { W = 0.55f }), rounding, ImDrawFlags.None, 1f);
+        drawList.AddRect(pos, pos + size, ImGui.GetColorU32(Gold with { W = BorderAlpha }), rounding, ImDrawFlags.None, 1f);
         drawList.AddRect(pos + Vector2.One, pos + size - Vector2.One, ImGui.GetColorU32(new Vector4(0, 0, 0, 0.55f)), rounding - 1f, ImDrawFlags.None, 1f);
     }
 
