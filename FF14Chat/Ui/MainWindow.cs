@@ -728,6 +728,43 @@ public class MainWindow : Window, IDisposable
     }
 
     private bool inputActiveLastFrame;
+    private TabState? inputTab;
+
+    // Say -> Party -> Alliance -> FC, the useful everyday rotation.
+    private static readonly int[] ChannelCycle = [1, 2, 3, 6];
+
+    /// <summary>Switches the game's active input channel to the next in the cycle.</summary>
+    private unsafe void CycleGameChannel()
+    {
+        var agent = AgentChatLog.Instance();
+        var shell = RaptureShellModule.Instance();
+        if (agent == null || shell == null)
+            return;
+
+        var index = Array.IndexOf(ChannelCycle, (int)agent->CurrentChannel);
+        var next = ChannelCycle[(index + 1) % ChannelCycle.Length];
+
+        var empty = Utf8String.FromString(string.Empty);
+        try
+        {
+            shell->ChangeChatChannel(next, 0, empty, true);
+        }
+        finally
+        {
+            empty->Dtor(true);
+        }
+    }
+
+    private void SwitchToNextTab(TabState current)
+    {
+        var all = tabs.Snapshot();
+        if (all.Length < 2)
+            return;
+
+        var index = Array.FindIndex(all, t => t.Id == current.Id);
+        selectTabId = all[(index + 1 + all.Length) % all.Length].Id;
+        focusInput = true;
+    }
 
     /// <summary>
     /// The game's currently active input channel (what an untargeted message
@@ -789,6 +826,7 @@ public class MainWindow : Window, IDisposable
 
     private void DrawInput(TabState tab)
     {
+        inputTab = tab;
         drafts.TryGetValue(tab.Id, out var draft);
         draft ??= string.Empty;
 
@@ -925,9 +963,21 @@ public class MainWindow : Window, IDisposable
             return 0;
         }
 
-        // Tab: accept the highlighted suggestion.
+        // Tab: with text, accept the highlighted suggestion; on an empty
+        // input, cycle chats (fixed-destination tabs) or the game's active
+        // channel (General/System), which updates the border indicator.
         if (data.EventFlag == ImGuiInputTextFlags.CallbackCompletion)
         {
+            if (data.BufTextLen == 0)
+            {
+                if (inputTab is { } current && (current.IsTell || current.SendCommand is { Length: > 0 }))
+                    SwitchToNextTab(current);
+                else
+                    CycleGameChannel();
+
+                return 0;
+            }
+
             if (suggestions.Count > 0)
             {
                 var completed = suggestions[Math.Clamp(suggestionIndex, 0, suggestions.Count - 1)].Command + " ";
