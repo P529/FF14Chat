@@ -726,10 +726,37 @@ public class MainWindow : Window, IDisposable
             ImGui.SetScrollHereY(1f);
     }
 
+    private bool inputActiveLastFrame;
+
+    /// <summary>The log color of the channel plain text goes to in this tab, if fixed.</summary>
+    private static Vector4? SendChannelColor(TabState tab)
+    {
+        if (tab.IsTell)
+            return ChatColors.For(XivChatType.TellOutgoing);
+
+        return tab.SendCommand switch
+        {
+            "/p" or "/party" => ChatColors.For(XivChatType.Party),
+            "/fc" or "/freecompany" => ChatColors.For(XivChatType.FreeCompany),
+            "/s" or "/say" => ChatColors.For(XivChatType.Say),
+            "/sh" or "/shout" => ChatColors.For(XivChatType.Shout),
+            "/y" or "/yell" => ChatColors.For(XivChatType.Yell),
+            "/a" or "/alliance" => ChatColors.For(XivChatType.Alliance),
+            "/n" or "/novice" => ChatColors.For(XivChatType.NoviceNetwork),
+            _ => null,
+        };
+    }
+
     private void DrawInput(TabState tab)
     {
         drafts.TryGetValue(tab.Id, out var draft);
         draft ??= string.Empty;
+
+        // While the field is focused, tint its border with the channel color
+        // the message will be sent in, as a destination indicator.
+        var sendColor = SendChannelColor(tab);
+        using var border = ImRaii.PushColor(
+            ImGuiCol.Border, sendColor.GetValueOrDefault(), inputActiveLastFrame && sendColor.HasValue);
 
         if (focusInput)
         {
@@ -754,6 +781,7 @@ public class MainWindow : Window, IDisposable
             | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion,
             InputCallback);
         var inputActive = ImGui.IsItemActive();
+        inputActiveLastFrame = inputActive;
         drafts[tab.Id] = draft;
 
         UpdateSuggestions(draft, inputActive || focusInput);
