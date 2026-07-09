@@ -91,22 +91,37 @@ public sealed class TabManager
         }
     }
 
-    /// <summary>Moves a tab to a new index and persists the order.</summary>
-    public void Move(TabState tab, int newIndex)
+    /// <summary>
+    /// Aligns the tab list with the display order reported by ImGui and
+    /// persists it when it changed. Ids not in the list keep their position.
+    /// </summary>
+    public void SetOrder(List<string> orderedIds)
     {
+        if (orderedIds.Count == 0)
+            return;
+
+        var changed = false;
         lock (gate)
         {
-            var oldIndex = tabs.IndexOf(tab);
-            if (oldIndex < 0 || newIndex < 0 || newIndex >= tabs.Count || oldIndex == newIndex)
-                return;
+            var sorted = tabs
+                .OrderBy(t =>
+                {
+                    var index = orderedIds.IndexOf(t.Id);
+                    return index < 0 ? int.MaxValue : index;
+                })
+                .ToList();
 
-            tabs.RemoveAt(oldIndex);
-            tabs.Insert(newIndex, tab);
-
-            configuration.TabOrder = [.. tabs.Select(t => t.Id)];
+            if (!sorted.SequenceEqual(tabs))
+            {
+                tabs.Clear();
+                tabs.AddRange(sorted);
+                configuration.TabOrder = [.. tabs.Select(t => t.Id)];
+                changed = true;
+            }
         }
 
-        configuration.Save();
+        if (changed)
+            configuration.Save();
     }
 
     public void Route(Message message)

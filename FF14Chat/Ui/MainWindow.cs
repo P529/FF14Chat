@@ -296,17 +296,13 @@ public class MainWindow : Window, IDisposable
         if (focusInput)
             ImGui.SetWindowFocus();
 
-        // Reordering is handled manually (ImGui's Reorderable flag never
-        // persists its order), see HandleTabReorder.
-        using var tabBar = ImRaii.TabBar("##tabs");
+        using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable);
         if (!tabBar.Success)
             return;
 
-        var tabList = tabs.Snapshot();
-        for (var i = 0; i < tabList.Length; i++)
+        imguiIdToTabId.Clear();
+        foreach (var tab in tabs.Snapshot())
         {
-            var tab = tabList[i];
-
             // Constant label (badge drawn as an overlay) so tab widths never
             // jump when unread counts appear and disappear. The trailing
             // spaces reserve room for the badge.
@@ -318,8 +314,8 @@ public class MainWindow : Window, IDisposable
                 var open = true;
                 using (var item = ImRaii.TabItem(label, ref open, itemFlags))
                 {
+                    imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
                     DrawUnreadBadge(tab);
-                    HandleTabReorder(tab, i, tabList.Length);
                     if (item.Success)
                         DrawTab(tab);
                 }
@@ -330,34 +326,38 @@ public class MainWindow : Window, IDisposable
             else
             {
                 using var item = ImRaii.TabItem(label);
+                imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
                 DrawUnreadBadge(tab);
-                HandleTabReorder(tab, i, tabList.Length);
                 if (item.Success)
                     DrawTab(tab);
             }
         }
 
+        SyncTabOrder();
         selectTabId = null;
     }
 
+    private readonly Dictionary<uint, string> imguiIdToTabId = [];
+    private readonly List<string> orderScratch = [];
+
     /// <summary>
-    /// Drag-to-reorder for the tab header (the last ImGui item): once the
-    /// pointer leaves the held tab sideways, swap it with its neighbor and
-    /// persist the new order.
+    /// ImGui owns drag-reordering (its order is runtime-only), so read the
+    /// display order back from the tab bar's internal state and persist it.
     /// </summary>
-    private void HandleTabReorder(TabState tab, int index, int count)
+    private void SyncTabOrder()
     {
-        if (!ImGui.IsItemActive() || ImGui.IsItemHovered())
+        var bar = ImGuiP.ImGuiTabBar();
+        if (bar.IsNull)
             return;
 
-        var mouseX = ImGui.GetMousePos().X;
-        var min = ImGui.GetItemRectMin().X;
-        var max = ImGui.GetItemRectMax().X;
+        orderScratch.Clear();
+        for (var i = 0; i < bar.Tabs.Size; i++)
+        {
+            if (imguiIdToTabId.TryGetValue(bar.Tabs[i].ID, out var tabId))
+                orderScratch.Add(tabId);
+        }
 
-        if (mouseX < min && index > 0)
-            tabs.Move(tab, index - 1);
-        else if (mouseX > max && index < count - 1)
-            tabs.Move(tab, index + 1);
+        tabs.SetOrder(orderScratch);
     }
 
     /// <summary>Places the window over the vanilla chat log, once, on first load.</summary>
