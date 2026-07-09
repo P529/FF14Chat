@@ -66,6 +66,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Chat font size in px; must be a native Axis size (10, 12, 14, 18).</summary>
     public int FontSize { get; set; } = 12;
 
+    /// <summary>Merge the General and System tabs into a single "All" tab.</summary>
+    public bool CombineGeneralSystem { get; set; }
+
     /// <summary>Legacy pre-v2 flag; superseded by <see cref="Theme"/>.</summary>
     public bool MutedTheme { get; set; } = true;
 

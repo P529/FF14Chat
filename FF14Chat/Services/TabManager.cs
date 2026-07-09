@@ -60,9 +60,43 @@ public sealed class TabManager
         this.configuration = configuration;
         this.store = store;
 
+        tabs.AddRange(BuildFixedTabs());
+        ApplySavedOrder();
+    }
+
+    private List<TabState> BuildFixedTabs()
+    {
+        var result = new List<TabState>();
+        TabState? combined = null;
+
         foreach (var tabConfig in configuration.Tabs)
         {
-            tabs.Add(new TabState
+            var isGeneral = tabConfig.Name == "General";
+            var isSystem = tabConfig.Name == "System";
+
+            if (configuration.CombineGeneralSystem && (isGeneral || isSystem))
+            {
+                if (combined == null)
+                {
+                    // Reuses General's id so it keeps General's saved order slot.
+                    combined = new TabState
+                    {
+                        Id = "tab:General",
+                        Title = "All",
+                        Channels = [.. tabConfig.Channels],
+                        CatchAll = true,
+                    };
+                    result.Add(combined);
+                }
+                else
+                {
+                    combined.Channels!.UnionWith(tabConfig.Channels);
+                }
+
+                continue;
+            }
+
+            result.Add(new TabState
             {
                 Id = "tab:" + tabConfig.Name,
                 Title = tabConfig.Name,
@@ -71,6 +105,49 @@ public sealed class TabManager
                 TrackUnread = tabConfig.NotifyUnread,
                 SendCommand = tabConfig.SendCommand,
             });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Rebuilds the fixed tabs from config (e.g. after toggling the combined
+    /// All tab), backfilling them from the message store. Tell tabs survive.
+    /// </summary>
+    public void RebuildFixedTabs()
+    {
+        lock (gate)
+        {
+            tabs.RemoveAll(t => !t.IsTell);
+            var fixedTabs = BuildFixedTabs();
+
+            foreach (var message in store.Snapshot())
+            {
+                var masked = (XivChatType)((ushort)message.Type & 0x7F);
+                var anyMatch = false;
+                foreach (var tab in fixedTabs)
+                {
+                    if (tab.Channels!.Contains(message.Type) || tab.Channels.Contains(masked))
+                    {
+                        tab.Add(message);
+                        anyMatch = true;
+                    }
+                }
+
+                if (!anyMatch && !ChatTypes.IsBattleSpam(message.Type))
+                {
+                    foreach (var tab in fixedTabs)
+                    {
+                        if (tab.CatchAll)
+                            tab.Add(message);
+                    }
+                }
+            }
+
+            foreach (var tab in fixedTabs)
+                tab.Unread = 0;
+
+            tabs.InsertRange(0, fixedTabs);
         }
 
         ApplySavedOrder();

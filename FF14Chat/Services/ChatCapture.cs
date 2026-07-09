@@ -48,20 +48,22 @@ public sealed class ChatCapture : IDisposable
         if (now - gameTimestamp > TimeSpan.FromMinutes(2))
             return;
 
-        // Trace every event so unknown channels can be diagnosed from /xllog
-        // with the plugin's log level at Debug.
-        Plugin.Log.Debug(
-            "chat: type={Type} (0x{TypeHex:X}) masked={Masked} sender='{Sender}' text='{Text}'",
-            (ushort)chatMessage.LogKind,
-            (ushort)chatMessage.LogKind,
-            (ushort)chatMessage.LogKind & 0x7F,
-            chatMessage.Sender.TextValue,
-            chatMessage.Message.TextValue is { Length: > 40 } t ? t[..40] : chatMessage.Message.TextValue);
-
         // Battle spam is never displayed and would crowd chat out of both
         // the in-memory ring and the hydration window.
         if (ChatTypes.IsBattleSpam(chatMessage.LogKind))
             return;
+
+        // Unnamed non-battle kinds are rare; log them so mystery channels
+        // (e.g. specific emote outputs) can be identified from /xllog.
+        if (!Enum.IsDefined(chatMessage.LogKind))
+        {
+            Plugin.Log.Information(
+                "unmapped chat type={Type} (masked={Masked}) sender='{Sender}' text='{Text}'",
+                (ushort)chatMessage.LogKind,
+                (ushort)chatMessage.LogKind & 0x7F,
+                chatMessage.Sender.TextValue,
+                chatMessage.Message.TextValue is { Length: > 40 } t ? t[..40] : chatMessage.Message.TextValue);
+        }
 
         var senderText = chatMessage.Sender.TextValue;
         var messageText = chatMessage.Message.TextValue;

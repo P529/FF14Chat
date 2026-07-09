@@ -520,6 +520,11 @@ public class MainWindow : Window, IDisposable
         if (bar.IsNull)
             return;
 
+        // Mid-drag, ImGui has a reorder queued it hasn't applied yet;
+        // resubmitting in a new order now trips its internal assertions.
+        if (bar.ReorderRequestTabId != 0)
+            return;
+
         orderScratch.Clear();
         for (var i = 0; i < bar.Tabs.Size; i++)
         {

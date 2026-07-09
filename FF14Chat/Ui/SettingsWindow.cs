@@ -75,6 +75,14 @@ public class SettingsWindow : Window, IDisposable
             config.Save();
         }
 
+        var combine = config.CombineGeneralSystem;
+        if (ImGui.Checkbox("Combine General and System into \"All\"", ref combine))
+        {
+            config.CombineGeneralSystem = combine;
+            config.Save();
+            plugin.TabManager.RebuildFixedTabs();
+        }
+
         var hideVanilla = config.HideVanillaChat;
         if (ImGui.Checkbox("Hide vanilla chat while open", ref hideVanilla))
         {
