@@ -33,6 +33,7 @@ public class MainWindow : Window, IDisposable
     private bool enterWasDown;
     private bool slashWasDown;
     private bool pendingSlash;
+    private bool clearSelection;
 
     // Conditions in which Enter belongs to the game (advancing NPC dialogue,
     // cutscenes, occupied states), not to the chat window.
@@ -214,6 +215,7 @@ public class MainWindow : Window, IDisposable
         {
             ImGui.SetKeyboardFocusHere();
             focusInput = false;
+            clearSelection = true;
 
             if (pendingSlash)
             {
@@ -227,8 +229,8 @@ public class MainWindow : Window, IDisposable
         ImGui.SetNextItemWidth(-1);
         var submitted = ImGui.InputTextWithHint(
             $"##input{tab.Id}", hint, ref draft, 500,
-            ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory,
-            HistoryCallback);
+            ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory | ImGuiInputTextFlags.CallbackAlways,
+            InputCallback);
         drafts[tab.Id] = draft;
 
         if (!submitted)
@@ -241,8 +243,23 @@ public class MainWindow : Window, IDisposable
         ImGui.SetKeyboardFocusHere(-1);
     }
 
-    private int HistoryCallback(ImGuiInputTextCallbackDataPtr data)
+    private int InputCallback(ImGuiInputTextCallbackDataPtr data)
     {
+        if (data.EventFlag == ImGuiInputTextFlags.CallbackAlways)
+        {
+            // Programmatic focus selects the whole buffer; typing would then
+            // replace it. Put the cursor at the end with nothing selected.
+            if (clearSelection)
+            {
+                clearSelection = false;
+                data.CursorPos = data.BufTextLen;
+                data.SelectionStart = data.BufTextLen;
+                data.SelectionEnd = data.BufTextLen;
+            }
+
+            return 0;
+        }
+
         if (data.EventFlag != ImGuiInputTextFlags.CallbackHistory || sentHistory.Count == 0)
             return 0;
 
