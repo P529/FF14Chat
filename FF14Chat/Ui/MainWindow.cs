@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.Text;
 using Dalamud.Interface.Utility.Raii;
@@ -29,6 +31,30 @@ public class MainWindow : Window, IDisposable
     private bool focusInput;
 
     private bool enterWasDown;
+    private bool slashWasDown;
+    private bool pendingSlash;
+
+    // Conditions in which Enter belongs to the game (advancing NPC dialogue,
+    // cutscenes, occupied states), not to the chat window.
+    private static readonly ConditionFlag[] EnterBlockedConditions =
+    [
+        ConditionFlag.Occupied,
+        ConditionFlag.Occupied30,
+        ConditionFlag.Occupied33,
+        ConditionFlag.Occupied38,
+        ConditionFlag.Occupied39,
+        ConditionFlag.OccupiedInEvent,
+        ConditionFlag.OccupiedInQuestEvent,
+        ConditionFlag.OccupiedInCutSceneEvent,
+        ConditionFlag.OccupiedSummoningBell,
+        ConditionFlag.WatchingCutscene,
+        ConditionFlag.WatchingCutscene78,
+        ConditionFlag.BetweenAreas,
+        ConditionFlag.BetweenAreas51,
+    ];
+
+    [DllImport("user32.dll")]
+    private static extern short VkKeyScanW(char ch);
 
     public MainWindow(Plugin plugin, TabManager tabs) : base("FF14Chat###FF14ChatMain")
     {
@@ -61,10 +87,15 @@ public class MainWindow : Window, IDisposable
     private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
         var enterDown = Plugin.KeyState[VirtualKey.RETURN];
-        var pressed = enterDown && !enterWasDown;
+        var enterPressed = enterDown && !enterWasDown;
         enterWasDown = enterDown;
 
-        if (!pressed || !IsOpen)
+        var (slashKey, slashNeedsShift) = SlashKey();
+        var slashDown = slashKey != VirtualKey.NO_KEY && Plugin.KeyState[slashKey];
+        var slashPressed = slashDown && !slashWasDown;
+        slashWasDown = slashDown;
+
+        if (!IsOpen || (!enterPressed && !slashPressed))
             return;
 
         if (ImGui.GetIO().WantTextInput)
@@ -74,8 +105,35 @@ public class MainWindow : Window, IDisposable
         if (atkModule != null && atkModule->AtkModule.IsTextInputActive())
             return;
 
-        Plugin.KeyState[VirtualKey.RETURN] = false;
+        if (enterPressed)
+        {
+            foreach (var flag in EnterBlockedConditions)
+            {
+                if (Plugin.Condition[flag])
+                    return;
+            }
+
+            Plugin.KeyState[VirtualKey.RETURN] = false;
+            focusInput = true;
+            return;
+        }
+
+        // Slash: only when the layout's shift requirement matches what's held.
+        if (Plugin.KeyState[VirtualKey.SHIFT] != slashNeedsShift)
+            return;
+
+        Plugin.KeyState[slashKey] = false;
         focusInput = true;
+        pendingSlash = true;
+    }
+
+    /// <summary>Resolves which physical key produces '/' on the current keyboard layout.</summary>
+    private static (VirtualKey Key, bool NeedsShift) SlashKey()
+    {
+        var scan = VkKeyScanW('/');
+        if (scan == -1)
+            return (VirtualKey.NO_KEY, false);
+        return ((VirtualKey)(scan & 0xFF), (scan & 0x100) != 0);
     }
 
     public override void Draw()
@@ -156,6 +214,13 @@ public class MainWindow : Window, IDisposable
         {
             ImGui.SetKeyboardFocusHere();
             focusInput = false;
+
+            if (pendingSlash)
+            {
+                pendingSlash = false;
+                if (draft.Length == 0)
+                    draft = "/";
+            }
         }
 
         var hint = tab.IsTell ? $"Message {tab.Title}…" : "Chat or /command…";
