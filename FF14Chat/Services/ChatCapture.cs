@@ -38,6 +38,16 @@ public sealed class ChatCapture : IDisposable
         // one per vanilla panel displaying it); drop exact repeats arriving
         // within a few hundred milliseconds.
         var now = DateTime.Now;
+
+        // The game re-emits recent backlog into its panels on login; those
+        // lines carry their original timestamp and were captured last
+        // session, so drop anything meaningfully older than "now".
+        var gameTimestamp = chatMessage.Timestamp > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(chatMessage.Timestamp).LocalDateTime
+            : now;
+        if (now - gameTimestamp > TimeSpan.FromMinutes(2))
+            return;
+
         var senderText = chatMessage.Sender.TextValue;
         var messageText = chatMessage.Message.TextValue;
         if (chatMessage.LogKind == lastType
@@ -58,7 +68,7 @@ public sealed class ChatCapture : IDisposable
 
         var message = new Message
         {
-            Timestamp = DateTime.Now,
+            Timestamp = gameTimestamp,
             Type = chatMessage.LogKind,
             Sender = chatMessage.Sender.TextValue,
             Text = chatMessage.Message.TextValue,

@@ -120,6 +120,21 @@ Data flow: `IChatGui.ChatMessage` → `ChatCapture` normalizes into `Message` �
 4. **SeString round-tripping** — always keep the original encoded bytes; regenerating from plaintext loses links and colors.
 5. **ToS** — all plugins are technically against ToS; personal use, standard don't-advertise-in-game hygiene.
 
+## Audit findings (2026-07-09 self-review)
+
+Fixed during the audit:
+- Input destination indicator now reads the real active channel from `AgentChatLog.CurrentChannel`/`ChannelLabel` (previously wrongly claimed impossible).
+- Capture now uses the message's game timestamp and drops login backlog replays (>2 min old), closing a cross-session duplicate-row vector.
+
+Known gaps, accepted for now:
+- The 300 ms dedup window can swallow a genuinely repeated identical message (e.g. macro double-send).
+- Enter/`/` interception assumes default keybinds; a rebound chat key isn't honored.
+- The Enter blocked-conditions list is curated, not exhaustive — new occupied states may need adding as found.
+- `ChatSender` applies its own sanitation, not the game's `SanitizeString`; unusual unicode may render differently than vanilla would send it.
+- `TabOrder` and `ClosedTellTabs` accumulate stale tell ids indefinitely (harmless, could prune on load).
+- CWLS channels 2-8 share CWLS1's indicator color (their `XivChatType` values are non-contiguous; same color anyway).
+- Native item tooltip remains unimplemented; `AgentItemDetail` manipulation is possible but patch-fragile — the custom card stays until it hurts.
+
 ## Suggested order of attack
 
 M0 → M1 → M2 gets the "chat with tell tabs" core visible fast (~the first week of evenings). M3 makes it usable, M4 delivers the autocomplete ask, M5 persistence. M6 fidelity is where polish time disappears — timebox it.
