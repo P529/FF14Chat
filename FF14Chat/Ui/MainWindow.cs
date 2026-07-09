@@ -349,6 +349,10 @@ public class MainWindow : Window, IDisposable
         FFTheme.DrawWindowBackground();
         DrawHeader();
 
+        // Submitted before the tab bar so the arrows win clicks over tabs
+        // beneath them (earliest overlapping ImGui item gets the click).
+        TabScrollArrowInputs();
+
         if (focusInput)
             ImGui.SetWindowFocus();
 
@@ -396,60 +400,102 @@ public class MainWindow : Window, IDisposable
         }
 
         SyncTabOrder();
-        DrawTabScrollControls();
+        UpdateTabScroll();
+        DrawTabScrollArrowVisuals();
         selectTabId = null;
     }
 
-    /// <summary>
-    /// Mousewheel over the tab strip scrolls it; overlay arrows at both ends
-    /// scroll on click and grey out at their limit.
-    /// </summary>
-    private void DrawTabScrollControls()
+    // Tab strip scroll state, captured inside the tab bar scope each frame
+    // and used by the arrow inputs submitted before it next frame.
+    private Vector2 tabStripMin;
+    private Vector2 tabStripMax;
+    private float tabScrollCurrent;
+    private float tabScrollMax;
+    private float pendingTabScroll;
+    private bool leftArrowHovered;
+    private bool rightArrowHovered;
+
+    private float TabArrowSize => tabStripMax.Y - tabStripMin.Y;
+
+    private bool LeftArrowEnabled => tabScrollCurrent > 0.5f;
+    private bool RightArrowEnabled => tabScrollCurrent < tabScrollMax - 0.5f;
+
+    private Vector2 LeftArrowPos => tabStripMin;
+    private Vector2 RightArrowPos => new(tabStripMax.X - TabArrowSize, tabStripMin.Y);
+
+    /// <summary>Invisible click-catchers for the scroll arrows.</summary>
+    private void TabScrollArrowInputs()
+    {
+        if (tabScrollMax <= 0f || TabArrowSize <= 0f)
+            return;
+
+        leftArrowHovered = TabArrowButton("##tabscroll-l", LeftArrowPos, LeftArrowEnabled, -120f);
+        rightArrowHovered = TabArrowButton("##tabscroll-r", RightArrowPos, RightArrowEnabled, 120f);
+    }
+
+    private bool TabArrowButton(string id, Vector2 pos, bool enabled, float delta)
+    {
+        var restore = ImGui.GetCursorScreenPos();
+        ImGui.SetCursorScreenPos(pos);
+        var clicked = ImGui.InvisibleButton(id, new Vector2(TabArrowSize, TabArrowSize));
+        var hovered = ImGui.IsItemHovered();
+        ImGui.SetCursorScreenPos(restore);
+
+        if (enabled && clicked)
+            pendingTabScroll += delta;
+
+        return hovered;
+    }
+
+    /// <summary>Applies wheel/arrow scrolling and refreshes the strip state. Tab bar scope only.</summary>
+    private void UpdateTabScroll()
     {
         var bar = ImGui.GetCurrentContext().CurrentTabBar;
         if (bar.IsNull)
             return;
 
-        var barMin = bar.BarRect.Min;
-        var barMax = bar.BarRect.Max;
-        var visibleWidth = barMax.X - barMin.X;
-        var maxScroll = Math.Max(0f, bar.WidthAllTabs - visibleWidth);
-        if (maxScroll <= 0f)
-            return;
+        tabStripMin = bar.BarRect.Min;
+        tabStripMax = bar.BarRect.Max;
+        tabScrollMax = Math.Max(0f, bar.WidthAllTabs - (tabStripMax.X - tabStripMin.X));
 
         var mouse = ImGui.GetMousePos();
         var overBar = ImGui.IsWindowHovered()
-                      && mouse.X >= barMin.X && mouse.X <= barMax.X
-                      && mouse.Y >= barMin.Y && mouse.Y <= barMax.Y;
+                      && mouse.X >= tabStripMin.X && mouse.X <= tabStripMax.X
+                      && mouse.Y >= tabStripMin.Y && mouse.Y <= tabStripMax.Y;
         var wheel = ImGui.GetIO().MouseWheel;
         if (overBar && wheel != 0f)
-            bar.ScrollingTarget = Math.Clamp(bar.ScrollingTarget - wheel * 80f, 0f, maxScroll);
+            pendingTabScroll -= wheel * 80f;
 
-        var height = barMax.Y - barMin.Y;
-        DrawTabScrollArrow(bar, maxScroll, left: true, new Vector2(barMin.X, barMin.Y), height, bar.ScrollingTarget > 0.5f);
-        DrawTabScrollArrow(bar, maxScroll, left: false, new Vector2(barMax.X - height, barMin.Y), height, bar.ScrollingTarget < maxScroll - 0.5f);
+        if (pendingTabScroll != 0f)
+        {
+            bar.ScrollingTarget = Math.Clamp(bar.ScrollingTarget + pendingTabScroll, 0f, tabScrollMax);
+            pendingTabScroll = 0f;
+        }
+
+        tabScrollCurrent = bar.ScrollingTarget;
     }
 
-    private void DrawTabScrollArrow(ImGuiTabBarPtr bar, float maxScroll, bool left, Vector2 pos, float height, bool enabled)
+    private void DrawTabScrollArrowVisuals()
     {
-        var restore = ImGui.GetCursorScreenPos();
-        ImGui.SetCursorScreenPos(pos);
-        var clicked = ImGui.InvisibleButton(left ? "##tabscroll-l" : "##tabscroll-r", new Vector2(height, height));
-        var hovered = ImGui.IsItemHovered();
-        ImGui.SetCursorScreenPos(restore);
+        if (tabScrollMax <= 0f || TabArrowSize <= 0f)
+            return;
 
-        if (enabled && clicked)
-            bar.ScrollingTarget = Math.Clamp(bar.ScrollingTarget + (left ? -120f : 120f), 0f, maxScroll);
+        DrawTabArrow(LeftArrowPos, left: true, LeftArrowEnabled, leftArrowHovered);
+        DrawTabArrow(RightArrowPos, left: false, RightArrowEnabled, rightArrowHovered);
+    }
 
+    private void DrawTabArrow(Vector2 pos, bool left, bool enabled, bool hovered)
+    {
+        var size = TabArrowSize;
         var drawList = ImGui.GetWindowDrawList();
-        // Backing so the arrow reads over scrolled tabs.
-        drawList.AddRectFilled(pos, pos + new Vector2(height, height), ImGui.GetColorU32(FFTheme.BgBottom with { W = 0.85f }), 2f);
+        // Backing so the arrow reads over the tabs scrolling beneath it.
+        drawList.AddRectFilled(pos, pos + new Vector2(size, size), ImGui.GetColorU32(FFTheme.BgBottom with { W = 0.85f }), 2f);
 
         var color = !enabled
             ? FFTheme.TextDim with { W = 0.35f }
             : hovered ? FFTheme.GoldBright : FFTheme.Gold;
-        var center = pos + new Vector2(height / 2f, height / 2f);
-        var arm = height * 0.22f;
+        var center = pos + new Vector2(size / 2f, size / 2f);
+        var arm = size * 0.22f;
         var dir = left ? -1f : 1f;
         drawList.AddTriangleFilled(
             center + new Vector2(dir * arm, 0),

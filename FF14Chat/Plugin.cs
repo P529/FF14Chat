@@ -88,8 +88,33 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        // v4: earlier versions appended deserialized collections onto the
+        // defaults (Newtonsoft population), duplicating tabs on every load.
+        if (Configuration.Version < 4)
+        {
+            var seen = new System.Collections.Generic.HashSet<string>();
+            var deduped = new System.Collections.Generic.List<TabConfig>();
+            // Keep the LAST occurrence per name: appended entries are the
+            // user's saved config, the earlier ones are stale defaults.
+            for (var i = Configuration.Tabs.Count - 1; i >= 0; i--)
+            {
+                if (seen.Add(Configuration.Tabs[i].Name))
+                    deduped.Insert(0, Configuration.Tabs[i]);
+            }
+
+            Configuration.Tabs = deduped;
+
+            var orderSeen = new System.Collections.Generic.HashSet<string>();
+            Configuration.TabOrder.RemoveAll(id => !orderSeen.Add(id));
+            var closedSeen = new System.Collections.Generic.HashSet<string>();
+            Configuration.ClosedTellTabs.RemoveAll(id => !closedSeen.Add(id));
+
+            Configuration.Version = 4;
+            Configuration.Save();
+        }
+
         MessageStore = new MessageStore();
-        TabManager = new TabManager(Configuration);
+        TabManager = new TabManager(Configuration, MessageStore);
 
         Database = new MessageDatabase(
             System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "chat.db"));

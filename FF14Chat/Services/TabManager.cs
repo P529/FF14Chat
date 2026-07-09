@@ -50,10 +50,12 @@ public sealed class TabManager
     private readonly object gate = new();
     private readonly List<TabState> tabs = [];
     private readonly Configuration configuration;
+    private readonly MessageStore store;
 
-    public TabManager(Configuration configuration)
+    public TabManager(Configuration configuration, MessageStore store)
     {
         this.configuration = configuration;
+        this.store = store;
 
         foreach (var tabConfig in configuration.Tabs)
         {
@@ -171,14 +173,10 @@ public sealed class TabManager
                 if (live)
                     reopenedClosedTab = configuration.ClosedTellTabs.Remove(partner);
 
-                var tellTab = new TabState
-                {
-                    Id = "tell:" + partner,
-                    Title = partner.Split('@')[0],
-                    TellPartner = partner,
-                    TrackUnread = true,
-                };
-                tellTab.Add(message);
+                // The triggering message is already in the store, so the
+                // backfill includes it.
+                var tellTab = CreateTellTab(partner);
+                tellTab.Unread = live ? 1 : 0;
                 tabs.Add(tellTab);
             }
         }
@@ -214,16 +212,34 @@ public sealed class TabManager
             if (existing != null)
                 return existing;
 
-            var tellTab = new TabState
-            {
-                Id = "tell:" + partner,
-                Title = partner.Split('@')[0],
-                TellPartner = partner,
-                TrackUnread = true,
-            };
+            var tellTab = CreateTellTab(partner);
+            tellTab.Unread = 0;
             tabs.Add(tellTab);
             return tellTab;
         }
+    }
+
+    /// <summary>
+    /// Builds a tell tab backfilled with the partner's conversation from the
+    /// message store, so closing and reopening a tab never loses history.
+    /// </summary>
+    private TabState CreateTellTab(string partner)
+    {
+        var tellTab = new TabState
+        {
+            Id = "tell:" + partner,
+            Title = partner.Split('@')[0],
+            TellPartner = partner,
+            TrackUnread = true,
+        };
+
+        foreach (var message in store.Snapshot())
+        {
+            if (message.TellPartner == partner)
+                tellTab.Add(message);
+        }
+
+        return tellTab;
     }
 
     public void MarkRead(TabState tab)

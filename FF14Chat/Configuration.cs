@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
 using Dalamud.Game.Text;
+using Newtonsoft.Json;
 
 namespace FF14Chat;
 
@@ -17,6 +18,10 @@ public enum ChatTheme
 public class TabConfig
 {
     public string Name { get; set; } = "";
+
+    // Replace: Newtonsoft otherwise APPENDS deserialized entries to
+    // default-initialized collections, duplicating them on every load.
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public HashSet<XivChatType> Channels { get; set; } = [];
 
     /// <summary>Also receives non-combat messages no other tab matched.</summary>
@@ -31,6 +36,8 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 0;
 
+    // Replace: see TabConfig.Channels — appending duplicated every tab on load.
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<TabConfig> Tabs { get; set; } = DefaultTabs();
 
     /// <summary>Window can no longer be moved or resized.</summary>
@@ -43,9 +50,11 @@ public class Configuration : IPluginConfiguration
     public bool PlacedAtVanillaChat { get; set; }
 
     /// <summary>Display order of tabs by tab id; unknown ids keep their position.</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<string> TabOrder { get; set; } = [];
 
     /// <summary>Tell partners whose tabs were closed; not restored on load until they chat again.</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<string> ClosedTellTabs { get; set; } = [];
 
     /// <summary>Chat font size in px; must be a native Axis size (10, 12, 14, 18).</summary>
