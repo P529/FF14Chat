@@ -830,6 +830,21 @@ public class MainWindow : Window, IDisposable
         drafts.TryGetValue(tab.Id, out var draft);
         draft ??= string.Empty;
 
+        // Empty-input Tab cycling. Handled at draw level rather than in the
+        // completion callback: ImGui doesn't deliver the completion event for
+        // an empty buffer (Tab falls through to keyboard nav instead).
+        if (inputActiveLastFrame && draft.Length == 0 && ImGui.IsKeyPressed(ImGuiKey.Tab, false))
+        {
+            var direction = ImGui.GetIO().KeyShift ? -1 : 1;
+            if (tab.IsTell || tab.SendCommand is { Length: > 0 })
+                SwitchToNextTab(tab, direction);
+            else
+                CycleGameChannel(direction);
+
+            // Nav may have stolen focus for this frame; take it back.
+            focusInput = true;
+        }
+
         // While the field is focused, tint its border with the channel color
         // the message will be sent in, as a destination indicator.
         var destination = SendDestination(tab);
@@ -968,18 +983,6 @@ public class MainWindow : Window, IDisposable
         // channel (General/System), which updates the border indicator.
         if (data.EventFlag == ImGuiInputTextFlags.CallbackCompletion)
         {
-            if (data.BufTextLen == 0)
-            {
-                // Shift+Tab cycles backwards.
-                var direction = ImGui.GetIO().KeyShift ? -1 : 1;
-                if (inputTab is { } current && (current.IsTell || current.SendCommand is { Length: > 0 }))
-                    SwitchToNextTab(current, direction);
-                else
-                    CycleGameChannel(direction);
-
-                return 0;
-            }
-
             if (suggestions.Count > 0)
             {
                 var completed = suggestions[Math.Clamp(suggestionIndex, 0, suggestions.Count - 1)].Command + " ";
