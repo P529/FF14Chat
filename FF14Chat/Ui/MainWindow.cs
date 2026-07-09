@@ -352,9 +352,13 @@ public class MainWindow : Window, IDisposable
         if (focusInput)
             ImGui.SetWindowFocus();
 
-        // FittingPolicyScroll: overflowing tabs scroll horizontally (with
-        // arrow buttons) instead of shrinking.
-        using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable | ImGuiTabBarFlags.FittingPolicyScroll);
+        // FittingPolicyScroll: overflowing tabs scroll horizontally instead of
+        // shrinking. The native scroll arrows can't show a disabled state, so
+        // they're hidden and we draw our own (see DrawTabScrollControls).
+        using var tabBar = ImRaii.TabBar(
+            "##tabs",
+            ImGuiTabBarFlags.Reorderable | ImGuiTabBarFlags.FittingPolicyScroll
+            | ImGuiTabBarFlags.NoTabListScrollingButtons);
         if (!tabBar.Success)
             return;
 
@@ -392,7 +396,66 @@ public class MainWindow : Window, IDisposable
         }
 
         SyncTabOrder();
+        DrawTabScrollControls();
         selectTabId = null;
+    }
+
+    /// <summary>
+    /// Mousewheel over the tab strip scrolls it; overlay arrows at both ends
+    /// scroll on click and grey out at their limit.
+    /// </summary>
+    private void DrawTabScrollControls()
+    {
+        var bar = ImGuiP.ImGuiTabBar();
+        if (bar.IsNull)
+            return;
+
+        var barMin = bar.BarRect.Min;
+        var barMax = bar.BarRect.Max;
+        var visibleWidth = barMax.X - barMin.X;
+        var maxScroll = Math.Max(0f, bar.WidthAllTabs - visibleWidth);
+        if (maxScroll <= 0f)
+            return;
+
+        var mouse = ImGui.GetMousePos();
+        var overBar = ImGui.IsWindowHovered()
+                      && mouse.X >= barMin.X && mouse.X <= barMax.X
+                      && mouse.Y >= barMin.Y && mouse.Y <= barMax.Y;
+        var wheel = ImGui.GetIO().MouseWheel;
+        if (overBar && wheel != 0f)
+            bar.ScrollingTarget = Math.Clamp(bar.ScrollingTarget - wheel * 80f, 0f, maxScroll);
+
+        var height = barMax.Y - barMin.Y;
+        DrawTabScrollArrow(bar, maxScroll, left: true, new Vector2(barMin.X, barMin.Y), height, bar.ScrollingTarget > 0.5f);
+        DrawTabScrollArrow(bar, maxScroll, left: false, new Vector2(barMax.X - height, barMin.Y), height, bar.ScrollingTarget < maxScroll - 0.5f);
+    }
+
+    private void DrawTabScrollArrow(ImGuiTabBarPtr bar, float maxScroll, bool left, Vector2 pos, float height, bool enabled)
+    {
+        var restore = ImGui.GetCursorScreenPos();
+        ImGui.SetCursorScreenPos(pos);
+        var clicked = ImGui.InvisibleButton(left ? "##tabscroll-l" : "##tabscroll-r", new Vector2(height, height));
+        var hovered = ImGui.IsItemHovered();
+        ImGui.SetCursorScreenPos(restore);
+
+        if (enabled && clicked)
+            bar.ScrollingTarget = Math.Clamp(bar.ScrollingTarget + (left ? -120f : 120f), 0f, maxScroll);
+
+        var drawList = ImGui.GetWindowDrawList();
+        // Backing so the arrow reads over scrolled tabs.
+        drawList.AddRectFilled(pos, pos + new Vector2(height, height), ImGui.GetColorU32(FFTheme.BgBottom with { W = 0.85f }), 2f);
+
+        var color = !enabled
+            ? FFTheme.TextDim with { W = 0.35f }
+            : hovered ? FFTheme.GoldBright : FFTheme.Gold;
+        var center = pos + new Vector2(height / 2f, height / 2f);
+        var arm = height * 0.22f;
+        var dir = left ? -1f : 1f;
+        drawList.AddTriangleFilled(
+            center + new Vector2(dir * arm, 0),
+            center + new Vector2(-dir * arm * 0.6f, -arm),
+            center + new Vector2(-dir * arm * 0.6f, arm),
+            ImGui.GetColorU32(color));
     }
 
     private readonly Dictionary<uint, string> imguiIdToTabId = [];
