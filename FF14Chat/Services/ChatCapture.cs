@@ -19,6 +19,9 @@ public sealed class ChatCapture : IDisposable
     private string lastText = string.Empty;
     private DateTime lastTimestamp;
 
+    // Diagnostic window: log every event for the first minute after load.
+    private readonly DateTime loadedAt = DateTime.Now;
+
     public ChatCapture(MessageStore store, TabManager tabs, MessageDatabase database)
     {
         this.store = store;
@@ -45,16 +48,27 @@ public sealed class ChatCapture : IDisposable
         var gameTimestamp = chatMessage.Timestamp > 0
             ? DateTimeOffset.FromUnixTimeSeconds(chatMessage.Timestamp).LocalDateTime
             : now;
-        if (now - gameTimestamp > TimeSpan.FromMinutes(2))
-            return;
+        var replayDrop = now - gameTimestamp > TimeSpan.FromMinutes(2);
+        var battleDrop = ChatTypes.IsBattleSpam(chatMessage.LogKind);
 
-        // Battle spam is never displayed and would crowd chat out of both
-        // the in-memory ring and the hydration window.
-        if (ChatTypes.IsBattleSpam(chatMessage.LogKind))
+        // For the first minute after load, log every event BEFORE any drop,
+        // so silently filtered channels can be identified from /xllog.
+        if (now - loadedAt < TimeSpan.FromSeconds(60))
+        {
+            Plugin.Log.Information(
+                "capture: type={Type} masked={Masked} drop={Drop} sender='{Sender}' text='{Text}'",
+                (ushort)chatMessage.LogKind,
+                (ushort)chatMessage.LogKind & 0x7F,
+                replayDrop ? "replay" : battleDrop ? "battle" : "none",
+                chatMessage.Sender.TextValue,
+                chatMessage.Message.TextValue is { Length: > 40 } t ? t[..40] : chatMessage.Message.TextValue);
+        }
+
+        if (replayDrop || battleDrop)
             return;
 
         // Unnamed non-battle kinds are rare; log them so mystery channels
-        // (e.g. specific emote outputs) can be identified from /xllog.
+        // can be identified even outside the diagnostic window.
         if (!Enum.IsDefined(chatMessage.LogKind))
         {
             Plugin.Log.Information(
@@ -62,7 +76,7 @@ public sealed class ChatCapture : IDisposable
                 (ushort)chatMessage.LogKind,
                 (ushort)chatMessage.LogKind & 0x7F,
                 chatMessage.Sender.TextValue,
-                chatMessage.Message.TextValue is { Length: > 40 } t ? t[..40] : chatMessage.Message.TextValue);
+                chatMessage.Message.TextValue is { Length: > 40 } t2 ? t2[..40] : chatMessage.Message.TextValue);
         }
 
         var senderText = chatMessage.Sender.TextValue;
