@@ -124,12 +124,17 @@ public sealed class TabManager
             configuration.Save();
     }
 
-    public void Route(Message message)
+    /// <summary>
+    /// Routes a message into matching tabs. Hydration passes live=false so
+    /// closed tell tabs stay closed until the partner actually chats again.
+    /// </summary>
+    public void Route(Message message, bool live = true)
     {
         // Battle log entries pack source/target flags into the high bits;
         // the low 7 bits are the base kind, which is what filters care about.
         var masked = (XivChatType)((ushort)message.Type & 0x7F);
 
+        var reopenedClosedTab = false;
         lock (gate)
         {
             var anyFixedMatch = false;
@@ -160,6 +165,12 @@ public sealed class TabManager
 
             if (message.TellPartner is { } partner && !tabs.Any(t => t.TellPartner == partner))
             {
+                if (!live && configuration.ClosedTellTabs.Contains(partner))
+                    return;
+
+                if (live)
+                    reopenedClosedTab = configuration.ClosedTellTabs.Remove(partner);
+
                 var tellTab = new TabState
                 {
                     Id = "tell:" + partner,
@@ -171,6 +182,9 @@ public sealed class TabManager
                 tabs.Add(tellTab);
             }
         }
+
+        if (reopenedClosedTab)
+            configuration.Save();
     }
 
     public TabState[] Snapshot()
@@ -194,6 +208,8 @@ public sealed class TabManager
     {
         lock (gate)
         {
+            configuration.ClosedTellTabs.Remove(partner);
+
             var existing = tabs.FirstOrDefault(t => t.TellPartner == partner);
             if (existing != null)
                 return existing;
@@ -223,6 +239,12 @@ public sealed class TabManager
         lock (gate)
         {
             tabs.Remove(tab);
+
+            // Closed tell tabs must not resurrect from history on next load.
+            if (tab.TellPartner is { } partner && !configuration.ClosedTellTabs.Contains(partner))
+                configuration.ClosedTellTabs.Add(partner);
         }
+
+        configuration.Save();
     }
 }

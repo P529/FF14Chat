@@ -406,7 +406,7 @@ public class MainWindow : Window, IDisposable
     /// </summary>
     private void DrawTabScrollControls()
     {
-        var bar = ImGuiP.ImGuiTabBar();
+        var bar = ImGui.GetCurrentContext().CurrentTabBar;
         if (bar.IsNull)
             return;
 
@@ -467,7 +467,9 @@ public class MainWindow : Window, IDisposable
     /// </summary>
     private void SyncTabOrder()
     {
-        var bar = ImGuiP.ImGuiTabBar();
+        // Note: ImGuiP.ImGuiTabBar() CONSTRUCTS a tab bar; the live one hangs
+        // off the context. Only valid inside Begin/EndTabBar.
+        var bar = ImGui.GetCurrentContext().CurrentTabBar;
         if (bar.IsNull)
             return;
 

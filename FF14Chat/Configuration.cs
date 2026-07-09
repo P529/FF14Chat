@@ -45,6 +45,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Display order of tabs by tab id; unknown ids keep their position.</summary>
     public List<string> TabOrder { get; set; } = [];
 
+    /// <summary>Tell partners whose tabs were closed; not restored on load until they chat again.</summary>
+    public List<string> ClosedTellTabs { get; set; } = [];
+
     /// <summary>Chat font size in px; must be a native Axis size (10, 12, 14, 18).</summary>
     public int FontSize { get; set; } = 12;
 

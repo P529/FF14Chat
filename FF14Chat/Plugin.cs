@@ -134,7 +134,7 @@ public sealed class Plugin : IDalamudPlugin
             foreach (var message in Database.LoadForHydration(HydrateRecentLimit, HydrateTellLimit))
             {
                 MessageStore.Add(message);
-                TabManager.Route(message);
+                TabManager.Route(message, live: false);
             }
         }
         catch (System.Exception e)
