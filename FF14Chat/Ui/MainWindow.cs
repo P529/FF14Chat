@@ -28,10 +28,14 @@ public class MainWindow : Window, IDisposable
     private string historyStash = string.Empty;
     private bool focusInput;
 
+    private bool enterWasDown;
+
     public MainWindow(Plugin plugin, TabManager tabs) : base("FF14Chat###FF14ChatMain")
     {
         this.plugin = plugin;
         this.tabs = tabs;
+
+        Plugin.Framework.Update += OnFrameworkUpdate;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -44,11 +48,40 @@ public class MainWindow : Window, IDisposable
         Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        Plugin.Framework.Update -= OnFrameworkUpdate;
+    }
+
+    /// <summary>
+    /// Runs before the game processes input for the tick, so consuming the
+    /// key here keeps the vanilla chat box from opening. Render-time checks
+    /// are too late: the game has already reacted to the key by then.
+    /// </summary>
+    private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
+    {
+        var enterDown = Plugin.KeyState[VirtualKey.RETURN];
+        var pressed = enterDown && !enterWasDown;
+        enterWasDown = enterDown;
+
+        if (!pressed || !IsOpen)
+            return;
+
+        if (ImGui.GetIO().WantTextInput)
+            return;
+
+        var atkModule = RaptureAtkModule.Instance();
+        if (atkModule != null && atkModule->AtkModule.IsTextInputActive())
+            return;
+
+        Plugin.KeyState[VirtualKey.RETURN] = false;
+        focusInput = true;
+    }
 
     public override void Draw()
     {
-        HandleChatKey();
+        if (focusInput)
+            ImGui.SetWindowFocus();
 
         using var tabBar = ImRaii.TabBar("##tabs", ImGuiTabBarFlags.Reorderable);
         if (!tabBar.Success)
@@ -114,29 +147,7 @@ public class MainWindow : Window, IDisposable
             ImGui.SetScrollHereY(1f);
     }
 
-    /// <summary>
-    /// Lets Enter open our input like the vanilla chat key: when the window is
-    /// open and no text field (game or ImGui) is active, focus the input and
-    /// swallow the key so the vanilla chat box does not open too.
-    /// </summary>
-    private unsafe void HandleChatKey()
-    {
-        if (ImGui.GetIO().WantTextInput)
-            return;
-
-        if (!ImGui.IsKeyPressed(ImGuiKey.Enter, false) && !ImGui.IsKeyPressed(ImGuiKey.KeypadEnter, false))
-            return;
-
-        var atkModule = RaptureAtkModule.Instance();
-        if (atkModule != null && atkModule->AtkModule.IsTextInputActive())
-            return;
-
-        ImGui.SetWindowFocus(WindowName);
-        focusInput = true;
-        Plugin.KeyState[VirtualKey.RETURN] = false;
-    }
-
-    private unsafe void DrawInput(TabState tab)
+    private void DrawInput(TabState tab)
     {
         drafts.TryGetValue(tab.Id, out var draft);
         draft ??= string.Empty;
