@@ -155,30 +155,56 @@ public class MainWindow : Window, IDisposable
 
         foreach (var tab in tabs.Snapshot())
         {
-            var label = tab.Unread > 0
-                ? $"★ {tab.Title} ({tab.Unread})###{tab.Id}"
-                : $"{tab.Title}###{tab.Id}";
-
+            // Constant label (badge drawn as an overlay) so tab widths never
+            // jump when unread counts appear and disappear. The trailing
+            // spaces reserve room for the badge.
+            var label = $"{tab.Title}  ###{tab.Id}";
             var itemFlags = selectTabId == tab.Id ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
 
             if (tab.IsTell)
             {
                 var open = true;
-                using var item = ImRaii.TabItem(label, ref open, itemFlags);
-                if (item.Success)
-                    DrawTab(tab);
+                using (var item = ImRaii.TabItem(label, ref open, itemFlags))
+                {
+                    DrawUnreadBadge(tab);
+                    if (item.Success)
+                        DrawTab(tab);
+                }
+
                 if (!open)
                     tabs.Close(tab);
             }
             else
             {
                 using var item = ImRaii.TabItem(label);
+                DrawUnreadBadge(tab);
                 if (item.Success)
                     DrawTab(tab);
             }
         }
 
         selectTabId = null;
+    }
+
+    /// <summary>Draws a count bubble over the tab header (the last ImGui item).</summary>
+    private static void DrawUnreadBadge(TabState tab)
+    {
+        if (tab.Unread <= 0)
+            return;
+
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        var drawList = ImGui.GetWindowDrawList();
+
+        var radius = ImGui.GetFontSize() * 0.42f;
+        var center = new Vector2(max.X - radius - 2, min.Y + radius + 1);
+        var text = tab.Unread > 9 ? "9+" : tab.Unread.ToString();
+
+        drawList.AddCircleFilled(center, radius + 2, ImGui.GetColorU32(new Vector4(0.80f, 0.20f, 0.20f, 1f)));
+
+        var scale = 0.75f;
+        var size = ImGui.CalcTextSize(text) * scale;
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize() * scale, center - size / 2, 0xFFFFFFFF, text);
     }
 
     private void DrawTab(TabState tab)
@@ -504,10 +530,10 @@ public class MainWindow : Window, IDisposable
         switch (link)
         {
             case SegmentLink.Item item:
-                var name = item.Name ?? $"Item #{item.ItemId}";
-                ImGui.SetTooltip($"{name}{(item.Hq ? " " : "")}\nClick: copy name");
+                DrawItemTooltip(item);
                 if (clicked)
                 {
+                    var name = item.Name ?? $"Item #{item.ItemId}";
                     ImGui.SetClipboardText(name);
                     Notify($"Copied \"{name}\"");
                 }
@@ -530,6 +556,62 @@ public class MainWindow : Window, IDisposable
                 }
 
                 break;
+        }
+    }
+
+    private static Vector4 RarityColor(byte rarity) => rarity switch
+    {
+        2 => new Vector4(0.55f, 0.95f, 0.55f, 1f), // green
+        3 => new Vector4(0.45f, 0.65f, 1.00f, 1f), // blue
+        4 => new Vector4(0.75f, 0.55f, 0.95f, 1f), // purple
+        7 => new Vector4(0.95f, 0.60f, 0.75f, 1f), // pink (relic)
+        _ => new Vector4(0.95f, 0.95f, 0.95f, 1f),
+    };
+
+    private static void DrawItemTooltip(SegmentLink.Item link)
+    {
+        if (!Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().TryGetRow(link.ItemId, out var item))
+        {
+            ImGui.SetTooltip($"{link.Name ?? $"Item #{link.ItemId}"}\nClick: copy name");
+            return;
+        }
+
+        using var tooltip = ImRaii.Tooltip();
+
+        var icon = Plugin.TextureProvider
+            .GetFromGameIcon(new Dalamud.Interface.Textures.GameIconLookup(item.Icon, link.Hq))
+            .GetWrapOrEmpty();
+        ImGui.Image(icon.Handle, new Vector2(40, 40));
+        ImGui.SameLine();
+
+        using (ImRaii.Group())
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, RarityColor(item.Rarity)))
+            {
+                ImGui.TextUnformatted($"{item.Name.ExtractText()}{(link.Hq ? " " : "")}");
+            }
+
+            var category = item.ItemUICategory.ValueNullable?.Name.ExtractText() ?? "";
+            using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+            {
+                ImGui.TextUnformatted($"{category}  ·  Item Level {item.LevelItem.RowId}");
+                if (item.LevelEquip > 1)
+                    ImGui.TextUnformatted($"Equip Level {item.LevelEquip}");
+            }
+        }
+
+        var description = item.Description.ExtractText();
+        if (description.Length > 0)
+        {
+            ImGui.Separator();
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 320);
+            ImGui.TextUnformatted(description);
+            ImGui.PopTextWrapPos();
+        }
+
+        using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+        {
+            ImGui.TextUnformatted("Click: copy name");
         }
     }
 

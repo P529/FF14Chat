@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "PowerShell(\\(Invoke-WebRequest https://raw.githubusercontent.com/goatcorp/SamplePlugin/master/SamplePlugin/Windows/MainWindow.cs -UseBasicParsing\\).Content)",
-      "PowerShell(dotnet build *)"
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet run *)"
     ]
   }
 }
