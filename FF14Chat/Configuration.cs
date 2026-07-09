@@ -22,6 +22,15 @@ public class Configuration : IPluginConfiguration
 
     public List<TabConfig> Tabs { get; set; } = DefaultTabs();
 
+    /// <summary>Window can no longer be moved or resized.</summary>
+    public bool LockWindow { get; set; }
+
+    /// <summary>Hide the vanilla chat log while this window is open.</summary>
+    public bool HideVanillaChat { get; set; } = true;
+
+    /// <summary>One-shot: window was initially placed over the vanilla chat.</summary>
+    public bool PlacedAtVanillaChat { get; set; }
+
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
 
     private static List<TabConfig> DefaultTabs() =>

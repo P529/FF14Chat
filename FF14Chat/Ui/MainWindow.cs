@@ -13,6 +13,7 @@ using Dalamud.Interface.Windowing;
 using FF14Chat.Model;
 using FF14Chat.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace FF14Chat.Ui;
 
@@ -86,22 +87,31 @@ public class MainWindow : Window, IDisposable
         Size = new Vector2(600, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
 
-        Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
-                | ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground;
+        Flags = BaseFlags;
 
-        // The game's own UI font, for the authentic look.
+        // The game's own UI font. Must be one of the game's native bitmap
+        // sizes (Axis14 is the vanilla chat default) or it scales and blurs.
         gameFont = Plugin.PluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(
-            new GameFontStyle(GameFontFamily.Axis, 17f));
+            new GameFontStyle(GameFontFamilyAndSize.Axis14));
     }
+
+    private const ImGuiWindowFlags BaseFlags =
+        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+        | ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground;
 
     public void Dispose()
     {
         Plugin.Framework.Update -= OnFrameworkUpdate;
+        SetVanillaChatVisible(true);
         gameFont.Dispose();
     }
 
     public override void PreDraw()
     {
+        Flags = plugin.Configuration.LockWindow
+            ? BaseFlags | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize
+            : BaseFlags;
+
         themeColors = FFTheme.PushColors();
         themeStyles = FFTheme.PushStyles();
         if (gameFont.Available)
@@ -123,8 +133,23 @@ public class MainWindow : Window, IDisposable
     /// key here keeps the vanilla chat box from opening. Render-time checks
     /// are too late: the game has already reacted to the key by then.
     /// </summary>
+    private static readonly string[] VanillaChatAddons =
+        ["ChatLog", "ChatLogPanel_0", "ChatLogPanel_1", "ChatLogPanel_2", "ChatLogPanel_3"];
+
+    private unsafe void SetVanillaChatVisible(bool visible)
+    {
+        foreach (var name in VanillaChatAddons)
+        {
+            var addon = (AtkUnitBase*)Plugin.GameGui.GetAddonByName(name).Address;
+            if (addon != null && addon->IsVisible != visible)
+                addon->IsVisible = visible;
+        }
+    }
+
     private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
+        SetVanillaChatVisible(!(IsOpen && plugin.Configuration.HideVanillaChat));
+
         var enterDown = Plugin.KeyState[VirtualKey.RETURN];
         var enterPressed = enterDown && !enterWasDown;
         enterWasDown = enterDown;
@@ -177,6 +202,9 @@ public class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
+        if (!plugin.Configuration.PlacedAtVanillaChat)
+            TryPlaceAtVanillaChat();
+
         FFTheme.DrawWindowBackground();
         DrawHeader();
 
@@ -220,7 +248,21 @@ public class MainWindow : Window, IDisposable
         selectTabId = null;
     }
 
-    /// <summary>Title row: drag area, gold title, close button, fading gold rule.</summary>
+    /// <summary>Places the window over the vanilla chat log, once, on first load.</summary>
+    private void TryPlaceAtVanillaChat()
+    {
+        var addon = Plugin.GameGui.GetAddonByName("ChatLog");
+        if (addon.IsNull || !addon.IsReady)
+            return; // Not available yet (login screen); retry next frame.
+
+        ImGui.SetWindowPos(addon.Position);
+        ImGui.SetWindowSize(Vector2.Max(addon.ScaledSize, new Vector2(400, 250)));
+
+        plugin.Configuration.PlacedAtVanillaChat = true;
+        plugin.Configuration.Save();
+    }
+
+    /// <summary>Title row: drag area, gold title, lock and close buttons, fading gold rule.</summary>
     private void DrawHeader()
     {
         var width = ImGui.GetWindowWidth();
@@ -231,9 +273,12 @@ public class MainWindow : Window, IDisposable
         var screenStart = ImGui.GetCursorScreenPos();
 
         // Drag anywhere on the header (the window has no native title bar).
-        ImGui.InvisibleButton("##header-drag", new Vector2(width - padding * 2 - 24f, headerHeight));
-        if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
+        ImGui.InvisibleButton("##header-drag", new Vector2(width - padding * 2 - 48f, headerHeight));
+        if (!plugin.Configuration.LockWindow
+            && ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
+        {
             ImGui.SetWindowPos(ImGui.GetWindowPos() + ImGui.GetIO().MouseDelta);
+        }
 
         ImGui.SetCursorPos(start + new Vector2(2f, 2f));
         using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.GoldBright))
@@ -241,6 +286,7 @@ public class MainWindow : Window, IDisposable
             ImGui.TextUnformatted("Chat");
         }
 
+        DrawLockButton(new Vector2(width - padding - 42f, start.Y + 2f));
         DrawCloseButton(new Vector2(width - padding - 18f, start.Y + 2f));
 
         FFTheme.DrawFadingSeparator(
@@ -248,6 +294,49 @@ public class MainWindow : Window, IDisposable
             width - padding * 2);
 
         ImGui.SetCursorPos(new Vector2(start.X, start.Y + headerHeight + 8f));
+    }
+
+    private void DrawLockButton(Vector2 cursorPos)
+    {
+        ImGui.SetCursorPos(cursorPos);
+        var size = ImGui.GetTextLineHeight();
+        var locked = plugin.Configuration.LockWindow;
+
+        if (ImGui.InvisibleButton("##lock", new Vector2(size, size)))
+        {
+            plugin.Configuration.LockWindow = !locked;
+            plugin.Configuration.Save();
+        }
+
+        var hovered = ImGui.IsItemHovered();
+        if (hovered)
+            ImGui.SetTooltip(locked ? "Unlock window" : "Lock window (position and size)");
+
+        var min = ImGui.GetItemRectMin();
+        var scale = size / 16f;
+        var color = ImGui.GetColorU32(hovered ? FFTheme.GoldBright : locked ? FFTheme.Gold : FFTheme.TextDim);
+        var drawList = ImGui.GetWindowDrawList();
+
+        var centerX = min.X + size / 2f;
+        var bodyTop = min.Y + size * 0.48f;
+
+        // Body.
+        drawList.AddRectFilled(
+            new Vector2(centerX - 4.5f * scale, bodyTop),
+            new Vector2(centerX + 4.5f * scale, bodyTop + 6.5f * scale),
+            color, 1.5f * scale);
+
+        // Shackle: full arc when locked, tilted open arc otherwise.
+        if (locked)
+        {
+            drawList.PathArcTo(new Vector2(centerX, bodyTop), 3f * scale, MathF.PI, MathF.Tau);
+        }
+        else
+        {
+            drawList.PathArcTo(new Vector2(centerX + 1.5f * scale, bodyTop - 0.5f * scale), 3f * scale, MathF.PI * 0.95f, MathF.PI * 1.75f);
+        }
+
+        drawList.PathStroke(color, ImDrawFlags.None, 1.6f * scale);
     }
 
     private void DrawCloseButton(Vector2 cursorPos)
