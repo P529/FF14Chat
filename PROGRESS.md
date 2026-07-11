@@ -97,6 +97,11 @@ state of what actually works.
 - Deferred: history search (data layer ready). Rejected: presence tooltip.
 
 ## State of the tree
-- All of the above is **uncommitted** on `master` (last commit `dc15201`).
-- Version bumped to 0.1.0.0 in the csproj alongside the Release packaging
-  changes (win-x64 RID, stable Debug output path for the dev plugin).
+- Public at https://github.com/P529/FF14Chat; latest release **v0.1.2**
+  (2026-07-11). Releases are cut by pushing a `v*` tag matching the csproj
+  `<Version>`; users on the custom-repo URL auto-update in game.
+- Post-v0.1.1 fixes in v0.1.2: programmatic tab switching to earlier-drawn
+  tabs (backward Shift+Tab, wrap-around) never applied — `selectTabId` is now
+  consumed-on-apply and fixed tabs receive the SetSelected flag too; history
+  recall no longer reopens the suggestion popup (which stole Up/Down from
+  walking further back).
