@@ -585,7 +585,8 @@ public class MainWindow : Window, IDisposable
             return;
 
         imguiIdToTabId.Clear();
-        foreach (var tab in tabs.Snapshot())
+        var snapshot = tabs.Snapshot();
+        foreach (var tab in snapshot)
         {
             // Constant label (badge drawn as an overlay) so tab widths never
             // jump when unread counts appear and disappear. The trailing
@@ -595,7 +596,16 @@ public class MainWindow : Window, IDisposable
             var label = showPresence
                 ? $"  {tab.Title}  ###{tab.Id}"
                 : $"{tab.Title}  ###{tab.Id}";
-            var itemFlags = selectTabId == tab.Id ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+
+            // Consumed when applied: a switch set mid-loop targeting a tab
+            // drawn EARLIER in this frame must survive into the next frame's
+            // pass (backward Shift+Tab, wrap-around from the last tab).
+            var itemFlags = ImGuiTabItemFlags.None;
+            if (selectTabId == tab.Id)
+            {
+                itemFlags = ImGuiTabItemFlags.SetSelected;
+                selectTabId = null;
+            }
 
             if (tab.IsTell)
             {
@@ -623,7 +633,7 @@ public class MainWindow : Window, IDisposable
             }
             else
             {
-                using var item = ImRaii.TabItem(label);
+                using var item = ImRaii.TabItem(label, itemFlags);
                 imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
                 DrawUnreadBadge(tab);
                 if (item.Success)
@@ -635,7 +645,11 @@ public class MainWindow : Window, IDisposable
         UpdateTabScroll();
         DrawTabScrollArrowVisuals();
         DrawPlayerContextMenu();
-        selectTabId = null;
+
+        // A request naming a tab that no longer exists (closed in the gap)
+        // would otherwise linger and block focus handling forever.
+        if (selectTabId is { } pending && Array.TrueForAll(snapshot, t => t.Id != pending))
+            selectTabId = null;
     }
 
     private const string PlayerContextPopup = "player-context";
