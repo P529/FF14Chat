@@ -68,8 +68,8 @@ state of what actually works.
   popup after login may briefly miss friends.
 - **Failed-tell errors land in the tell tab** — the game echoes an outgoing
   tell even when delivery fails (recipient in a duty, offline...), then emits
-  an error line. The capture layer remembers the last outgoing echo for 5 s
-  and stamps a following ErrorMessage/SystemError with that partner, so the
+  an error line. The capture layer remembers the last outgoing echo for
+  500 ms and stamps a following ErrorMessage/SystemError with that partner, so the
   failure shows up in the conversation it belongs to (still also routed to
   its normal channel tabs; persisted with the partner, so it hydrates back
   into the tab). Matched by kind + timing, not text — locale-independent.

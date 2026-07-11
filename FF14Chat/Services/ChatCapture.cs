@@ -122,7 +122,7 @@ public sealed class ChatCapture : IDisposable
             // by kind and timing, not text, so it is locale-independent.
             var masked = (XivChatType)((ushort)chatMessage.LogKind & 0x7F);
             if (masked is XivChatType.ErrorMessage or XivChatType.SystemError
-                && now - lastOutgoingTellAt < TimeSpan.FromSeconds(5)
+                && now - lastOutgoingTellAt < TimeSpan.FromMilliseconds(500)
                 && tabs.TellPartners().Contains(attempted))
             {
                 tellPartner = attempted;
