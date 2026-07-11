@@ -20,6 +20,12 @@ public sealed class ChatCapture : IDisposable
     private string lastText = string.Empty;
     private DateTime lastTimestamp;
 
+    // The game echoes an outgoing tell into the log even when delivery
+    // fails, then follows with an error line ("...could not be delivered").
+    // Remember the echo so that error can be routed into the same tell tab.
+    private string? lastOutgoingTellPartner;
+    private DateTime lastOutgoingTellAt;
+
     // Diagnostic window: log every event for the first minute after load.
     private readonly DateTime loadedAt = DateTime.Now;
 
@@ -99,6 +105,35 @@ public sealed class ChatCapture : IDisposable
         var senderPlayer = MessageParser.ExtractPlayer(chatMessage.Sender);
         var isTell = chatMessage.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing;
 
+        // For tells, the sender field holds the other party (the recipient
+        // for outgoing tells).
+        var tellPartner = isTell ? senderPlayer ?? senderText : null;
+
+        if (chatMessage.LogKind == XivChatType.TellOutgoing && tellPartner != null)
+        {
+            lastOutgoingTellPartner = tellPartner;
+            lastOutgoingTellAt = now;
+        }
+        else if (!isTell && lastOutgoingTellPartner is { } attempted)
+        {
+            // A delivery failure arrives as an error line shortly after the
+            // echo; stamp it with the attempted partner so it lands in that
+            // tell tab (in addition to its normal channel routing). Matched
+            // by kind and timing, not text, so it is locale-independent.
+            var masked = (XivChatType)((ushort)chatMessage.LogKind & 0x7F);
+            if (masked is XivChatType.ErrorMessage or XivChatType.SystemError
+                && now - lastOutgoingTellAt < TimeSpan.FromSeconds(5)
+                && tabs.TellPartners().Contains(attempted))
+            {
+                tellPartner = attempted;
+                lastOutgoingTellPartner = null;
+
+                // The echo marked the partner active, but delivery failing
+                // disproves that; let the other presence sources decide.
+                presence.ClearActivity(attempted);
+            }
+        }
+
         var message = new Message
         {
             Timestamp = gameTimestamp,
@@ -109,17 +144,16 @@ public sealed class ChatCapture : IDisposable
             SenderRaw = chatMessage.Sender.Encode(),
             MessageRaw = chatMessage.Message.Encode(),
             SenderPlayer = senderPlayer,
-            // For tells, the sender field holds the other party (the
-            // recipient for outgoing tells).
-            TellPartner = isTell ? senderPlayer ?? chatMessage.Sender.TextValue : null,
+            TellPartner = tellPartner,
         };
 
         // A live line from a player proves them online; for tells the sender
-        // field holds the partner, and an outgoing tell only echoes back once
-        // the server delivered it.
+        // field holds the partner. (The outgoing echo alone does NOT prove
+        // delivery — the failure branch above retracts the note if an error
+        // follows.) Stamped error lines must not count as partner activity.
         if (message.SenderPlayer is { } activePlayer)
             presence.NoteActivity(activePlayer);
-        if (message.TellPartner is { } activePartner && activePartner != message.SenderPlayer)
+        if (isTell && message.TellPartner is { } activePartner && activePartner != message.SenderPlayer)
             presence.NoteActivity(activePartner);
 
         store.Add(message);

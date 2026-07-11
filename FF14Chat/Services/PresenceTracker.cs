@@ -66,6 +66,15 @@ public sealed class PresenceTracker : IDisposable
         lastActivity[partner] = DateTime.Now;
     }
 
+    /// <summary>
+    /// Retracts an activity note that turned out to prove nothing (e.g. an
+    /// outgoing tell echo followed by a delivery failure).
+    /// </summary>
+    public void ClearActivity(string partner)
+    {
+        lastActivity.Remove(partner);
+    }
+
     public PresenceStatus StatusFor(string partner)
     {
         if (observed.TryGetValue(partner, out var status))

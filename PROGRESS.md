@@ -66,6 +66,14 @@ state of what actually works.
   prefixing any known name (i.e. the message began). Friend names come from
   the same throttled info-proxy refresh the presence dots use, so the first
   popup after login may briefly miss friends.
+- **Failed-tell errors land in the tell tab** — the game echoes an outgoing
+  tell even when delivery fails (recipient in a duty, offline...), then emits
+  an error line. The capture layer remembers the last outgoing echo for 5 s
+  and stamps a following ErrorMessage/SystemError with that partner, so the
+  failure shows up in the conversation it belongs to (still also routed to
+  its normal channel tabs; persisted with the partner, so it hydrates back
+  into the tab). Matched by kind + timing, not text — locale-independent.
+  The echo's presence "online" note is retracted on failure.
 - **Shareable build** — `dotnet build -c Release` produces
   `FF14Chat\bin\Release\FF14Chat\latest.zip` (~1.2 MB, Windows-only natives).
   Friend installs it as a dev plugin (extract → /xlsettings → Experimental →
