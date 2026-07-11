@@ -1,0 +1,37 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly canary: builds against the newest Dalamud, so a Dalamud or
+    # game update that breaks compilation shows up as a failed run.
+    - cron: "0 6 * * 1"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud dev assemblies
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile "$env:RUNNER_TEMP\dalamud.zip"
+          Expand-Archive "$env:RUNNER_TEMP\dalamud.zip" "$env:RUNNER_TEMP\dalamud"
+          "DALAMUD_HOME=$env:RUNNER_TEMP\dalamud" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build
+        run: dotnet build FF14Chat/FF14Chat.csproj -c Release
+
+      - name: Upload plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: FF14Chat
+          path: FF14Chat/bin/Release/FF14Chat/latest.zip

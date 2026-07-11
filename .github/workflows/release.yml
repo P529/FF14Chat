@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud dev assemblies
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile "$env:RUNNER_TEMP\dalamud.zip"
+          Expand-Archive "$env:RUNNER_TEMP\dalamud.zip" "$env:RUNNER_TEMP\dalamud"
+          "DALAMUD_HOME=$env:RUNNER_TEMP\dalamud" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build
+        run: dotnet build FF14Chat/FF14Chat.csproj -c Release
+
+      # repo.json is the Dalamud custom-repo manifest. It is attached to every
+      # release, and the stable releases/latest/download URL always serves the
+      # newest one, so the in-game installer sees updates automatically.
+      - name: Generate repo.json
+        shell: pwsh
+        run: |
+          $manifest = Get-Content FF14Chat/bin/Release/FF14Chat/FF14Chat.json -Raw | ConvertFrom-Json
+          $tag = "$env:GITHUB_REF_NAME".TrimStart("v")
+          if (-not "$($manifest.AssemblyVersion)".StartsWith($tag)) {
+            throw "Tag v$tag does not match <Version> $($manifest.AssemblyVersion) in FF14Chat.csproj."
+          }
+          $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download"
+          $entry = [ordered]@{
+            Author              = $manifest.Author
+            Name                = $manifest.Name
+            InternalName        = $manifest.InternalName
+            AssemblyVersion     = $manifest.AssemblyVersion
+            Punchline           = $manifest.Punchline
+            Description         = $manifest.Description
+            ApplicableVersion   = $manifest.ApplicableVersion
+            DalamudApiLevel     = $manifest.DalamudApiLevel
+            Tags                = $manifest.Tags
+            RepoUrl             = "https://github.com/$env:GITHUB_REPOSITORY"
+            IsHide              = $false
+            IsTestingExclusive  = $false
+            LastUpdate          = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            DownloadCount       = 0
+            DownloadLinkInstall = "$base/latest.zip"
+            DownloadLinkTesting = "$base/latest.zip"
+            DownloadLinkUpdate  = "$base/latest.zip"
+          }
+          ConvertTo-Json -InputObject @($entry) -Depth 8 | Out-File repo.json -Encoding utf8
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            FF14Chat/bin/Release/FF14Chat/latest.zip
+            repo.json
+          generate_release_notes: true
