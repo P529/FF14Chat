@@ -1546,6 +1546,12 @@ public class MainWindow : Window, IDisposable
         var replacement = newPos == -1 ? historyStash : sentHistory[newPos];
         data.DeleteChars(0, data.BufTextLen);
         data.InsertChars(0, replacement);
+
+        // A recalled command must not pop the suggestion box, or the next
+        // Up/Down moves its highlight instead of walking history. Seeding
+        // the query keeps it suppressed until the text is actually edited.
+        suggestions = [];
+        suggestionQuery = replacement;
         return 0;
     }
 
