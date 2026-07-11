@@ -135,6 +135,21 @@ Known gaps, accepted for now:
 - CWLS channels 2-8 share CWLS1's indicator color (their `XivChatType` values are non-contiguous; same color anyway).
 - Native item tooltip remains unimplemented; `AgentItemDetail` manipulation is possible but patch-fragile — the custom card stays until it hurts.
 
+## v2 feature round (agreed 2026-07-10), in build order
+
+Bugfix gate before features (both cleared 2026-07-10):
+- ~~Social-window "Send Tell" opens vanilla chat instead of our tell tab~~ **fixed, mechanism documented for posterity:** the social window does NOT go through `RaptureShellModule.SetContextTellTarget` and does NOT set any tell-mode state. It fires the ChatLog addon's activation event (id 0x31, value 0x05) with the literal pre-fill text `"/tell Name@World "` in the third AtkValue (the slot ChatTwo calls AddIfNotPresent). The vanilla handler would insert that text into the chat input. We hook that handler (signature hook, non-fatal on patch breakage), consume the event while we're the active chat (vanilla input never opens/focuses), parse a `/tell` prefix into a tell tab, and route any other pre-fill text into the focused tab's draft. `AgentChatLog.ChangeChannelName` is also hooked with a one-tick-deferred sync reading `RaptureShellModule` `ChatType` 17/18 + `TellName`/`TellWorld` for flows that do switch the input to tell mode (e.g. reply).
+- ~~Friend presence flapping to blue (unknown)~~ fixed: friend statuses are now sticky per session (`friendStatuses` cache) — the info proxy empties on zone changes / while a request is in flight, and known friends must never degrade to unknown.
+
+1. ~~**Unread tab glow**~~ done — pulsing theme-gold outline drawn with the badge in `DrawUnreadBadge`.
+2. ~~**Date separators**~~ done — dim centered day rule in `DrawLog` on calendar-day change.
+3. ~~**Mention highlight**~~ done — gold wash + left bar on lines word-matching the local player's full or first name, own messages skipped; `HighlightMentions` toggle (default on).
+3.5. ~~**Player context menu**~~ done (added on request) — right-click a name in the log or a tell tab header: Send Tell, Target/Examine/Adventurer Plate (nearby only, disabled otherwise), Invite to Party (`InfoProxyPartyInvite`, by name+world — cross-world invites may need a content id and could fail), Copy Name. `PlayerActions.cs` holds the native calls. Not the literal native menu (can't be summoned for arbitrary names); Add Friend/Blacklist skipped pending verified APIs.
+4. ~~**Tab editor UI**~~ done — settings "Tabs" section: add/rename/delete, channel grid, unread/catch-all/send-command per tab. Renames carry the TabOrder slot; empty/duplicate names revert; combine-All flag auto-drops when General/System disappear (checkbox disabled then too).
+5. ~~**Player-name autocomplete**~~ done — `/tell `/`/t ` name completion from tell tabs/party/friends/nearby via the existing suggestion popup (entries are full `/tell Name@World` commands, so acceptance replaces the buffer unchanged). Mid-sentence completion stayed out of scope.
+
+Deferred: history search (data layer already supports it; revisit if wanted — would live behind a settings toggle). Tell-tab presence tooltip: rejected.
+
 ## Suggested order of attack
 
 M0 → M1 → M2 gets the "chat with tell tabs" core visible fast (~the first week of evenings). M3 makes it usable, M4 delivers the autocomplete ask, M5 persistence. M6 fidelity is where polish time disappears — timebox it.

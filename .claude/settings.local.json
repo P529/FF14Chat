@@ -3,7 +3,10 @@
     "allow": [
       "PowerShell(\\(Invoke-WebRequest https://raw.githubusercontent.com/goatcorp/SamplePlugin/master/SamplePlugin/Windows/MainWindow.cs -UseBasicParsing\\).Content)",
       "PowerShell(dotnet build *)",
-      "PowerShell(dotnet run *)"
+      "PowerShell(dotnet run *)",
+      "Bash(git -C /e/SlopProjects/FF14Chat log --oneline -15)",
+      "Bash(git -C /e/SlopProjects/FF14Chat log --since=\"3 days ago\" --stat --oneline)",
+      "Bash(dotnet build *)"
     ]
   }
 }

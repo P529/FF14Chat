@@ -22,6 +22,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static INotificationManager Notifications { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInterop { get; private set; } = null!;
+    [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
+    [PluginService] internal static IPartyList PartyList { get; private set; } = null!;
+    [PluginService] internal static Dalamud.Plugin.Services.ITargetManager TargetManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private const string CommandName = "/ff14chat";
@@ -33,6 +36,7 @@ public sealed class Plugin : IDalamudPlugin
     public MessageStore MessageStore { get; init; }
     public TabManager TabManager { get; init; }
     public MessageDatabase Database { get; init; }
+    public PresenceTracker Presence { get; init; }
 
     public readonly WindowSystem WindowSystem = new("FF14Chat");
     private ChatCapture ChatCapture { get; init; }
@@ -137,7 +141,8 @@ public sealed class Plugin : IDalamudPlugin
             System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "chat.db"));
         HydrateFromDatabase();
 
-        ChatCapture = new ChatCapture(MessageStore, TabManager, Database);
+        Presence = new PresenceTracker(TabManager);
+        ChatCapture = new ChatCapture(MessageStore, TabManager, Database, Presence);
 
         MainWindow = new MainWindow(this, TabManager);
         SettingsWindow = new SettingsWindow(this, MainWindow);
@@ -164,6 +169,7 @@ public sealed class Plugin : IDalamudPlugin
         SettingsWindow.Dispose();
         MainWindow.Dispose();
         ChatCapture.Dispose();
+        Presence.Dispose();
         Database.Dispose();
 
         CommandManager.RemoveHandler(CommandName);

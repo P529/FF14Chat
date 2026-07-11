@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Dalamud.Bindings.ImGui;
@@ -36,6 +37,7 @@ public class MainWindow : Window, IDisposable
     private int historyPos = -1;
     private string historyStash = string.Empty;
     private bool focusInput;
+    private bool suppressEnterUntilReleased;
 
     private readonly CommandIndex commandIndex = new();
     private List<CommandEntry> suggestions = [];
@@ -47,6 +49,7 @@ public class MainWindow : Window, IDisposable
     private bool enterWasDown;
     private bool slashWasDown;
     private bool pendingSlash;
+    private string? pendingInsert;
     private bool clearSelection;
 
     private IFontHandle gameFont;
@@ -105,9 +108,200 @@ public class MainWindow : Window, IDisposable
             setContextTellTargetHook = Plugin.GameInterop.HookFromAddress<SetContextTellTargetDelegate>(
                 (nint)RaptureShellModule.MemberFunctionPointers.SetContextTellTarget,
                 SetContextTellTargetDetour);
+
+            changeChannelNameHook = Plugin.GameInterop.HookFromAddress<ChangeChannelNameDelegate>(
+                (nint)AgentChatLog.MemberFunctionPointers.ChangeChannelName,
+                ChangeChannelNameDetour);
+
+            // Signature scan; a patch can invalidate it. The plugin still
+            // works without this hook, vanilla chat just steals input focus.
+            try
+            {
+                chatLogActivateHook = Plugin.GameInterop.HookFromSignature<ChatLogActivateDelegate>(
+                    ChatLogActivateSig, ChatLogActivateDetour);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.Error(e, "ChatLog activate signature no longer matches; vanilla input focus is not suppressed");
+            }
         }
 
         setContextTellTargetHook.Enable();
+        changeChannelNameHook.Enable();
+        chatLogActivateHook?.Enable();
+    }
+
+    // The ChatLog addon's event handler; event 0x31 with value 0x05/0x0C is
+    // the game asking the vanilla chat input to activate and take focus
+    // (chat keybind, reply, social-window Send Tell). Signature as used by
+    // ChatTwo for the same purpose.
+    private const string ChatLogActivateSig =
+        "40 53 57 41 57 48 81 EC ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 4D 8B F8";
+
+    private unsafe delegate byte ChatLogActivateDelegate(nint addon, ushort eventId, AtkValue* value);
+
+    private readonly Hook<ChatLogActivateDelegate>? chatLogActivateHook;
+
+    /// <summary>
+    /// While we're the active chat, chat-activation requests focus our input
+    /// instead of the vanilla one. The tell target (if any) was already set:
+    /// ChangeChannelName ran before this event fired.
+    /// </summary>
+    private unsafe byte ChatLogActivateDetour(nint addon, ushort eventId, AtkValue* value)
+    {
+        try
+        {
+            if (eventId == 0x31 && value != null && value->UInt is 0x05 or 0x0C)
+            {
+                // The third value can carry text the game wants pre-filled
+                // into the input — the social window's Send Tell passes the
+                // whole "/tell Name@World " command this way instead of
+                // switching the chat mode.
+                var insertValue = value + 2;
+                var insert = ((int)insertValue->Type & 0xF) == (int)AtkValueType.String
+                             && insertValue->String.HasValue
+                    ? insertValue->String.ToString()
+                    : string.Empty;
+
+                var consume = IsOpen && plugin.Configuration.HideVanillaChat && Plugin.ClientState.IsLoggedIn;
+                Plugin.Log.Debug(
+                    "ChatLog activate: value={Value:X} insert='{Insert}' consumed={Consumed}",
+                    value->UInt, insert, consume);
+                if (consume)
+                {
+                    if (insert.StartsWith("/tell ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var partner = insert["/tell ".Length..].Trim();
+                        Plugin.Framework.RunOnTick(() => OpenTellTabFor(partner));
+                    }
+                    else if (insert.Length > 0)
+                    {
+                        pendingInsert = insert;
+                    }
+
+                    // 0x0C is the tell-target activation; only that flavor
+                    // may trust the staged Temp* fields (they linger after
+                    // we swallow the commit, so a plain activation must not
+                    // read them).
+                    ScheduleTellTabSync(includeStaged: value->UInt == 0x0C);
+                    focusInput = true;
+                    return 1;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "ChatLog activate detour failed");
+        }
+
+        return chatLogActivateHook!.Original(addon, eventId, value);
+    }
+
+    /// <summary>Opens/selects the tell tab for "Name@World" (world appended from the local player if missing).</summary>
+    private void OpenTellTabFor(string partner)
+    {
+        if (partner.Length == 0)
+            return;
+
+        if (!partner.Contains('@')
+            && Plugin.ObjectTable.LocalPlayer is { } local
+            && local.HomeWorld.ValueNullable?.Name.ExtractText() is { Length: > 0 } homeWorld)
+        {
+            partner = $"{partner}@{homeWorld}";
+        }
+
+        Plugin.Log.Debug("Opening tell tab for '{Partner}'", partner);
+        var tellTab = tabs.OpenTellTab(partner);
+        selectTabId = tellTab.Id;
+        focusInput = true;
+    }
+
+    private unsafe delegate nint ChangeChannelNameDelegate(AgentChatLog* agent);
+
+    private readonly Hook<ChangeChannelNameDelegate> changeChannelNameHook;
+
+    /// <summary>
+    /// Runs whenever the game's input channel label changes (this is the
+    /// path the social window / friend list uses, which never goes through
+    /// SetContextTellTarget). The agent's tell fields are not final yet at
+    /// this point mid-flow — the target is written after the label updates —
+    /// so the actual read happens one tick later.
+    /// </summary>
+    private unsafe nint ChangeChannelNameDetour(AgentChatLog* agent)
+    {
+        var result = changeChannelNameHook.Original(agent);
+        ScheduleTellTabSync(includeStaged: false);
+        return result;
+    }
+
+    private void ScheduleTellTabSync(bool includeStaged)
+    {
+        Plugin.Framework.RunOnTick(() => SyncTellTabFromAgent(includeStaged));
+    }
+
+    /// <summary>
+    /// If the game's input channel is a tell, mirror its target into a tell
+    /// tab. Runs a tick after a channel change or chat activation, when the
+    /// agent's target fields are complete.
+    /// </summary>
+    private unsafe void SyncTellTabFromAgent(bool includeStaged)
+    {
+        try
+        {
+            if (!IsOpen || !plugin.Configuration.HideVanillaChat)
+                return;
+
+            var shell = RaptureShellModule.Instance();
+            var agent = AgentChatLog.Instance();
+            if (shell == null || agent == null)
+                return;
+
+            // The social window stages a pending tell in the Temp* fields and
+            // fires the chat-activation event; the vanilla handler we swallow
+            // is what would commit them to the active fields. Prefer staged.
+            var chatType = includeStaged ? shell->TempChatType : 0;
+            var name = includeStaged ? shell->TempTellName.ToString() : string.Empty;
+            var world = includeStaged ? shell->TempTellWorld.ToString() : string.Empty;
+            var worldId = includeStaged ? shell->TempTellWorldId : (ushort)0;
+
+            Plugin.Log.Debug(
+                "Tell sync: staged={Staged} temp={TempChatType}:'{TempName}'@'{TempWorld}'/{TempWorldId} committed={ChatType}:'{Name}'@'{World}' agent={Channel}:'{AgentName}'@{AgentWorldId}",
+                includeStaged,
+                shell->TempChatType, shell->TempTellName.ToString(), shell->TempTellWorld.ToString(), shell->TempTellWorldId,
+                shell->ChatType, shell->TellName.ToString(), shell->TellWorld.ToString(),
+                (int)agent->CurrentChannel, agent->TellPlayerName.ToString(), agent->TellWorldId);
+
+            // RaptureShellModule chat types 17/18 are the two tell modes.
+            if (chatType is not (17 or 18) || name.Length == 0)
+            {
+                chatType = shell->ChatType;
+                name = shell->TellName.ToString();
+                world = shell->TellWorld.ToString();
+                worldId = shell->TellWorldId;
+            }
+
+            if (chatType is not (17 or 18) || name.Length == 0)
+                return;
+
+            if (world.Length == 0)
+                world = ResolveWorldName(worldId);
+
+            var partner = world.Length > 0 ? $"{name}@{world}" : name;
+            var tellTab = tabs.OpenTellTab(partner);
+            selectTabId = tellTab.Id;
+            focusInput = true;
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "Tell tab sync failed");
+        }
+    }
+
+    private static string ResolveWorldName(ushort worldId)
+    {
+        return Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>().TryGetRow(worldId, out var world)
+            ? world.Name.ExtractText()
+            : string.Empty;
     }
 
     private unsafe delegate bool SetContextTellTargetDelegate(
@@ -126,15 +320,18 @@ public class MainWindow : Window, IDisposable
     {
         try
         {
+            Plugin.Log.Debug(
+                "SetContextTellTarget: name='{Name}' world='{World}' worldId={WorldId} reason={Reason} open={Open} hideVanilla={Hide}",
+                playerName != null ? playerName->ToString() : "<null>",
+                worldName != null ? worldName->ToString() : "<null>",
+                worldId, reason, IsOpen, plugin.Configuration.HideVanillaChat);
+
             if (IsOpen && plugin.Configuration.HideVanillaChat && playerName != null)
             {
                 var name = playerName->ToString();
                 var world = worldName != null ? worldName->ToString() : string.Empty;
-                if (world.Length == 0
-                    && Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>().TryGetRow(worldId, out var worldRow))
-                {
-                    world = worldRow.Name.ExtractText();
-                }
+                if (world.Length == 0)
+                    world = ResolveWorldName(worldId);
 
                 if (name.Length > 0)
                 {
@@ -202,6 +399,8 @@ public class MainWindow : Window, IDisposable
     {
         Plugin.Framework.Update -= OnFrameworkUpdate;
         setContextTellTargetHook.Dispose();
+        changeChannelNameHook.Dispose();
+        chatLogActivateHook?.Dispose();
         SetVanillaChatVisible(true);
         gameFont.Dispose();
     }
@@ -292,6 +491,16 @@ public class MainWindow : Window, IDisposable
         if (!Plugin.ClientState.IsLoggedIn)
             return;
 
+        // After a send unfocuses the input, the game would see the still-held
+        // Enter as a fresh press and open vanilla chat; eat it until released.
+        if (suppressEnterUntilReleased)
+        {
+            if (Plugin.KeyState[VirtualKey.RETURN])
+                Plugin.KeyState[VirtualKey.RETURN] = false;
+            else
+                suppressEnterUntilReleased = false;
+        }
+
         var enterDown = Plugin.KeyState[VirtualKey.RETURN];
         var enterPressed = enterDown && !enterWasDown;
         enterWasDown = enterDown;
@@ -347,6 +556,14 @@ public class MainWindow : Window, IDisposable
         if (!plugin.Configuration.PlacedAtVanillaChat)
             TryPlaceAtVanillaChat();
 
+        localFullName = Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? string.Empty;
+        var firstSpace = localFullName.IndexOf(' ');
+        localFirstName = firstSpace > 0 ? localFullName[..firstSpace] : string.Empty;
+
+        // Hashed at window-root scope so tab items can open it from within
+        // their own ID scope.
+        tabContextPopupId = ImGui.GetID(PlayerContextPopup);
+
         FFTheme.DrawWindowBackground();
         DrawHeader();
 
@@ -372,8 +589,12 @@ public class MainWindow : Window, IDisposable
         {
             // Constant label (badge drawn as an overlay) so tab widths never
             // jump when unread counts appear and disappear. The trailing
-            // spaces reserve room for the badge.
-            var label = $"{tab.Title}  ###{tab.Id}";
+            // spaces reserve room for the badge; tell tabs lead with spaces
+            // for the presence dot.
+            var showPresence = tab.IsTell && plugin.Configuration.ShowTellPresence;
+            var label = showPresence
+                ? $"  {tab.Title}  ###{tab.Id}"
+                : $"{tab.Title}  ###{tab.Id}";
             var itemFlags = selectTabId == tab.Id ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
 
             if (tab.IsTell)
@@ -382,6 +603,16 @@ public class MainWindow : Window, IDisposable
                 using (var item = ImRaii.TabItem(label, ref open, itemFlags))
                 {
                     imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
+                    // The tab header is the last item here, before DrawTab
+                    // submits the log and input.
+                    if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                    {
+                        contextPartner = tab.TellPartner;
+                        ImGui.OpenPopup(tabContextPopupId);
+                    }
+
+                    if (showPresence)
+                        DrawPresenceDot(tab);
                     DrawUnreadBadge(tab);
                     if (item.Success)
                         DrawTab(tab);
@@ -403,7 +634,63 @@ public class MainWindow : Window, IDisposable
         SyncTabOrder();
         UpdateTabScroll();
         DrawTabScrollArrowVisuals();
+        DrawPlayerContextMenu();
         selectTabId = null;
+    }
+
+    private const string PlayerContextPopup = "player-context";
+    private uint tabContextPopupId;
+    private uint logContextPopupId;
+    private string? contextPartner;
+
+    /// <summary>
+    /// Context menu for a right-clicked player (name in the log or tell tab
+    /// header). Entity-bound actions gray out while the player is not nearby.
+    /// Must be called in the same ID scope its popup id was hashed in.
+    /// </summary>
+    private void DrawPlayerContextMenu()
+    {
+        if (contextPartner is not { } partner)
+            return;
+
+        using var popup = ImRaii.Popup(PlayerContextPopup);
+        if (!popup.Success)
+            return;
+
+        var (name, _) = PlayerActions.Split(partner);
+
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.GoldBright))
+        {
+            ImGui.TextUnformatted(partner);
+        }
+
+        ImGui.Separator();
+
+        if (ImGui.Selectable("Send Tell"))
+            OpenTellTabFor(partner);
+
+        var nearby = PlayerActions.FindNearby(partner);
+        using (ImRaii.Disabled(nearby == null))
+        {
+            if (ImGui.Selectable("Target"))
+                PlayerActions.Target(nearby!);
+            if (ImGui.Selectable("Examine"))
+                PlayerActions.Examine(nearby!);
+            if (ImGui.Selectable("Adventurer Plate"))
+                PlayerActions.OpenAdventurerPlate(nearby!);
+        }
+
+        if (nearby == null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Only available while the player is nearby.");
+
+        if (ImGui.Selectable("Invite to Party") && !PlayerActions.InviteToParty(partner))
+            Notify($"Could not invite {name}.");
+
+        if (ImGui.Selectable("Copy Name"))
+        {
+            ImGui.SetClipboardText(name);
+            Notify($"Copied \"{name}\"");
+        }
     }
 
     // Tab strip scroll state, captured inside the tab bar scope each frame
@@ -673,7 +960,33 @@ public class MainWindow : Window, IDisposable
         drawList.AddLine(new Vector2(max.X - inset, min.Y + inset), new Vector2(min.X + inset, max.Y - inset), color, 1.5f);
     }
 
-    /// <summary>Draws a count bubble over the tab header (the last ImGui item).</summary>
+    /// <summary>
+    /// Draws the partner's online status as a dot at the left edge of the tab
+    /// header (the last ImGui item): green online, red AFK, gray offline,
+    /// blue unknown (not a friend, not in party, not nearby — no data).
+    /// </summary>
+    private void DrawPresenceDot(TabState tab)
+    {
+        var status = plugin.Presence.StatusFor(tab.TellPartner!);
+        var color = status switch
+        {
+            PresenceStatus.Online => new Vector4(0.35f, 0.85f, 0.40f, 1f),
+            PresenceStatus.Afk => new Vector4(0.90f, 0.30f, 0.25f, 1f),
+            PresenceStatus.Offline => new Vector4(0.55f, 0.55f, 0.55f, 0.90f),
+            _ => new Vector4(0.35f, 0.55f, 0.95f, 0.90f),
+        };
+
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        var radius = ImGui.GetFontSize() * 0.18f;
+        var center = new Vector2(min.X + radius + 5f, (min.Y + max.Y) / 2f + 1f);
+        ImGui.GetWindowDrawList().AddCircleFilled(center, radius, ImGui.GetColorU32(color), 12);
+    }
+
+    /// <summary>
+    /// Draws the unread markers over the tab header (the last ImGui item):
+    /// a pulsing outline plus a count bubble.
+    /// </summary>
     private static void DrawUnreadBadge(TabState tab)
     {
         if (tab.Unread <= 0)
@@ -682,6 +995,12 @@ public class MainWindow : Window, IDisposable
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
         var drawList = ImGui.GetWindowDrawList();
+
+        var pulse = 0.5f + 0.5f * MathF.Sin((float)ImGui.GetTime() * 3.5f);
+        var glow = FFTheme.GoldBright with { W = 0.25f + 0.55f * pulse };
+        drawList.AddRect(
+            min + new Vector2(1f, 1f), max - new Vector2(1f, 1f),
+            ImGui.GetColorU32(glow), 4f, ImDrawFlags.None, 2f);
 
         var radius = ImGui.GetFontSize() * 0.42f;
         var center = new Vector2(max.X - radius - 2, min.Y + radius + 1);
@@ -710,6 +1029,10 @@ public class MainWindow : Window, IDisposable
 
     private void DrawLog(TabState tab)
     {
+        // Hashed at the log child's root scope; DrawToken opens it from
+        // within message rows, DrawPlayerContextMenu below begins it here.
+        logContextPopupId = ImGui.GetID(PlayerContextPopup);
+
         var messages = tabs.MessagesSnapshot(tab);
         // First draw of a tab (e.g. history just hydrated) starts pinned.
         var firstDraw = tab.RenderedRevision == -1;
@@ -726,10 +1049,90 @@ public class MainWindow : Window, IDisposable
 
         var first = Math.Max(0, messages.Length - MaxRenderedMessages);
         for (var i = first; i < messages.Length; i++)
+        {
+            if (i > first && messages[i - 1].Timestamp.Date != messages[i].Timestamp.Date)
+                DrawDateSeparator(messages[i].Timestamp);
+
+            var lineStart = ImGui.GetCursorScreenPos();
+            var lineWidth = ImGui.GetContentRegionAvail().X;
             DrawMessage(messages[i]);
+
+            if (IsMention(messages[i]))
+            {
+                var bottom = ImGui.GetItemRectMax().Y;
+                var drawList = ImGui.GetWindowDrawList();
+                drawList.AddRectFilled(
+                    lineStart, new Vector2(lineStart.X + lineWidth, bottom),
+                    ImGui.GetColorU32(FFTheme.Gold with { W = 0.09f }));
+                drawList.AddRectFilled(
+                    lineStart - new Vector2(4f, 0f), new Vector2(lineStart.X - 2f, bottom),
+                    ImGui.GetColorU32(FFTheme.GoldBright with { W = 0.85f }));
+            }
+        }
+
+        DrawPlayerContextMenu();
 
         if (pinnedToBottom && newMessages)
             ImGui.SetScrollHereY(1f);
+    }
+
+    /// <summary>Dim centered "— Tuesday, July 8 —" rule between messages of different days.</summary>
+    private static void DrawDateSeparator(DateTime date)
+    {
+        var label = date.ToString("dddd, MMMM d");
+        var width = ImGui.GetContentRegionAvail().X;
+        var textSize = ImGui.CalcTextSize(label);
+
+        ImGui.Dummy(new Vector2(1f, 3f));
+        var pos = ImGui.GetCursorScreenPos();
+        var textX = pos.X + (width - textSize.X) / 2f;
+        var y = pos.Y + textSize.Y / 2f;
+        var drawList = ImGui.GetWindowDrawList();
+        var lineColor = ImGui.GetColorU32(FFTheme.TextDim with { W = 0.35f });
+        const float pad = 8f;
+
+        drawList.AddLine(new Vector2(pos.X, y), new Vector2(textX - pad, y), lineColor);
+        drawList.AddLine(new Vector2(textX + textSize.X + pad, y), new Vector2(pos.X + width, y), lineColor);
+
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim))
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (width - textSize.X) / 2f);
+            ImGui.TextUnformatted(label);
+        }
+
+        ImGui.Dummy(new Vector2(1f, 3f));
+    }
+
+    private string localFullName = string.Empty;
+    private string localFirstName = string.Empty;
+
+    private bool IsMention(Message message)
+    {
+        if (!plugin.Configuration.HighlightMentions || localFullName.Length == 0)
+            return false;
+
+        // Own messages quote your name constantly (emotes, tells); skip them.
+        if (message.Sender.StartsWith(localFullName, StringComparison.Ordinal))
+            return false;
+
+        return ContainsWord(message.Text, localFullName)
+               || (localFirstName.Length > 0 && ContainsWord(message.Text, localFirstName));
+    }
+
+    private static bool ContainsWord(string text, string word)
+    {
+        var index = 0;
+        while ((index = text.IndexOf(word, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            var boundaryBefore = index == 0 || !char.IsLetter(text[index - 1]);
+            var end = index + word.Length;
+            var boundaryAfter = end >= text.Length || !char.IsLetter(text[end]);
+            if (boundaryBefore && boundaryAfter)
+                return true;
+            index = end;
+        }
+
+        return false;
     }
 
     private bool inputActiveLastFrame;
@@ -856,7 +1259,10 @@ public class MainWindow : Window, IDisposable
         using var border = ImRaii.PushColor(
             ImGuiCol.Border, destination?.Color ?? default, inputActiveLastFrame && destination.HasValue);
 
-        if (focusInput)
+        // A pending tab switch (selectTabId) takes effect next frame; the
+        // outgoing tab must not consume the focus request meant for the
+        // incoming tab's input.
+        if (focusInput && (selectTabId == null || selectTabId == tab.Id))
         {
             ImGui.SetKeyboardFocusHere();
             focusInput = false;
@@ -867,6 +1273,15 @@ public class MainWindow : Window, IDisposable
                 pendingSlash = false;
                 if (draft.Length == 0)
                     draft = "/";
+            }
+
+            // Text the game asked to pre-fill into the chat input (e.g. an
+            // emote command from a UI button).
+            if (pendingInsert is { } insert)
+            {
+                pendingInsert = null;
+                if (draft.Length == 0)
+                    draft = insert;
             }
         }
 
@@ -894,18 +1309,50 @@ public class MainWindow : Window, IDisposable
             return;
 
         if (Submit(tab, draft))
+        {
             drafts[tab.Id] = string.Empty;
 
-        // Keep typing without re-clicking the field.
-        ImGui.SetKeyboardFocusHere(-1);
+            // Match vanilla: sending hands control back to the game (WASD
+            // works immediately); Enter re-opens the input.
+            ImGuiP.FocusWindow(default);
+            suppressEnterUntilReleased = true;
+        }
+        else
+        {
+            // Send failed; keep the draft and the focus so it can be fixed.
+            ImGui.SetKeyboardFocusHere(-1);
+        }
     }
+
+    private static readonly string[] TellCommands = ["/tell", "/t"];
 
     private void UpdateSuggestions(string draft, bool inputActive)
     {
-        var wantSuggestions = inputActive
-                              && draft.Length > 1
-                              && draft[0] == '/'
-                              && !draft.Contains(' ');
+        var wantSuggestions = inputActive && draft.Length > 1 && draft[0] == '/';
+
+        // "/tell " (or "/t ") switches from command completion to completing
+        // the name argument. Once the typed text stops prefixing any known
+        // player (i.e. the message part began), the popup disappears on its own.
+        string? tellCommand = null;
+        var tellPartial = string.Empty;
+        if (wantSuggestions)
+        {
+            foreach (var command in TellCommands)
+            {
+                if (draft.Length > command.Length
+                    && draft[command.Length] == ' '
+                    && draft.StartsWith(command, StringComparison.OrdinalIgnoreCase))
+                {
+                    tellCommand = draft[..command.Length];
+                    tellPartial = draft[(command.Length + 1)..];
+                    break;
+                }
+            }
+
+            if (tellCommand == null && draft.Contains(' '))
+                wantSuggestions = false;
+        }
+
         if (!wantSuggestions)
         {
             suggestions = [];
@@ -916,9 +1363,51 @@ public class MainWindow : Window, IDisposable
         if (draft != suggestionQuery)
         {
             suggestionQuery = draft;
-            suggestions = commandIndex.Query(draft);
+            suggestions = tellCommand != null
+                ? QueryTellNames(tellCommand, tellPartial)
+                : commandIndex.Query(draft);
             suggestionIndex = 0;
         }
+    }
+
+    /// <summary>
+    /// Name suggestions for a partial "/tell " target, as full commands so
+    /// the whole-buffer acceptance path works unchanged. Sources in priority
+    /// order: open tell tabs, party, friends, nearby players.
+    /// </summary>
+    private List<CommandEntry> QueryTellNames(string command, string partial)
+    {
+        var candidates = new List<(string Key, string Source)>();
+
+        foreach (var partner in tabs.TellPartners())
+            candidates.Add((partner, "tell tab"));
+
+        foreach (var member in Plugin.PartyList)
+        {
+            var name = member.Name.TextValue;
+            if (name.Length > 0)
+                candidates.Add((PresenceTracker.WithWorld(name, member.World.RowId), "party"));
+        }
+
+        foreach (var friend in plugin.Presence.FriendNames())
+            candidates.Add((friend, "friend"));
+
+        foreach (var obj in Plugin.ObjectTable)
+        {
+            if (obj is not Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter player)
+                continue;
+
+            var name = player.Name.TextValue;
+            if (name.Length > 0 && name != localFullName)
+                candidates.Add((PresenceTracker.WithWorld(name, player.HomeWorld.RowId), "nearby"));
+        }
+
+        return candidates
+            .Where(c => c.Key.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+            .DistinctBy(c => c.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .Select(c => new CommandEntry($"{command} {c.Key}", c.Source, false))
+            .ToList();
     }
 
     private void DrawSuggestions(TabState tab, Vector2 inputPos)
@@ -1164,12 +1653,18 @@ public class MainWindow : Window, IDisposable
                 break;
 
             case SegmentLink.Player player:
-                ImGui.SetTooltip($"{player.Partner}\nClick: open tell tab");
+                ImGui.SetTooltip($"{player.Partner}\nClick: open tell tab — right-click: menu");
                 if (clicked)
                 {
                     var tellTab = tabs.OpenTellTab(player.Partner);
                     selectTabId = tellTab.Id;
                     focusInput = true;
+                }
+
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                {
+                    contextPartner = player.Partner;
+                    ImGui.OpenPopup(logContextPopupId);
                 }
 
                 break;

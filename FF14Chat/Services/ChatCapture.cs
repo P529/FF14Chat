@@ -13,6 +13,7 @@ public sealed class ChatCapture : IDisposable
     private readonly MessageStore store;
     private readonly TabManager tabs;
     private readonly MessageDatabase database;
+    private readonly PresenceTracker presence;
 
     private XivChatType lastType;
     private string lastSender = string.Empty;
@@ -22,11 +23,12 @@ public sealed class ChatCapture : IDisposable
     // Diagnostic window: log every event for the first minute after load.
     private readonly DateTime loadedAt = DateTime.Now;
 
-    public ChatCapture(MessageStore store, TabManager tabs, MessageDatabase database)
+    public ChatCapture(MessageStore store, TabManager tabs, MessageDatabase database, PresenceTracker presence)
     {
         this.store = store;
         this.tabs = tabs;
         this.database = database;
+        this.presence = presence;
         Plugin.ChatGui.ChatMessage += OnChatMessage;
     }
 
@@ -111,6 +113,14 @@ public sealed class ChatCapture : IDisposable
             // recipient for outgoing tells).
             TellPartner = isTell ? senderPlayer ?? chatMessage.Sender.TextValue : null,
         };
+
+        // A live line from a player proves them online; for tells the sender
+        // field holds the partner, and an outgoing tell only echoes back once
+        // the server delivered it.
+        if (message.SenderPlayer is { } activePlayer)
+            presence.NoteActivity(activePlayer);
+        if (message.TellPartner is { } activePartner && activePartner != message.SenderPlayer)
+            presence.NoteActivity(activePartner);
 
         store.Add(message);
         tabs.Route(message);

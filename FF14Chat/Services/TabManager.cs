@@ -266,6 +266,15 @@ public sealed class TabManager
             configuration.Save();
     }
 
+    /// <summary>Partners of the currently open tell tabs.</summary>
+    public HashSet<string> TellPartners()
+    {
+        lock (gate)
+        {
+            return [.. tabs.Where(t => t.IsTell).Select(t => t.TellPartner!)];
+        }
+    }
+
     public TabState[] Snapshot()
     {
         lock (gate)
@@ -285,19 +294,30 @@ public sealed class TabManager
     /// <summary>Returns the tell tab for a partner, creating an empty one if needed.</summary>
     public TabState OpenTellTab(string partner)
     {
+        bool reopenedClosedTab;
+        TabState tellTab;
         lock (gate)
         {
-            configuration.ClosedTellTabs.Remove(partner);
+            // Persist the removal, or a restart resurrects the closed state
+            // and the hydration pass skips this partner's tab.
+            reopenedClosedTab = configuration.ClosedTellTabs.Remove(partner);
 
             var existing = tabs.FirstOrDefault(t => t.TellPartner == partner);
             if (existing != null)
-                return existing;
-
-            var tellTab = CreateTellTab(partner);
-            tellTab.Unread = 0;
-            tabs.Add(tellTab);
-            return tellTab;
+            {
+                tellTab = existing;
+            }
+            else
+            {
+                tellTab = CreateTellTab(partner);
+                tellTab.Unread = 0;
+                tabs.Add(tellTab);
+            }
         }
+
+        if (reopenedClosedTab)
+            configuration.Save();
+        return tellTab;
     }
 
     /// <summary>

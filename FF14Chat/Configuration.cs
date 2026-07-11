@@ -69,6 +69,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Merge the General and System tabs into a single "All" tab.</summary>
     public bool CombineGeneralSystem { get; set; }
 
+    /// <summary>Online status dot on tell tabs (green online, red AFK, gray offline, blue unknown).</summary>
+    public bool ShowTellPresence { get; set; } = true;
+
+    /// <summary>Highlight log lines that mention the local player's name.</summary>
+    public bool HighlightMentions { get; set; } = true;
+
     /// <summary>Legacy pre-v2 flag; superseded by <see cref="Theme"/>.</summary>
     public bool MutedTheme { get; set; } = true;
 
