@@ -613,8 +613,24 @@ public class MainWindow : Window, IDisposable
 
         imguiIdToTabId.Clear();
         var snapshot = tabs.Snapshot();
+
+        // FC-only tabs are pointless without a free company. CompanyTag is
+        // per character; null player (loading) counts as "in one" so tabs
+        // don't flicker away during login.
+        var inFreeCompany = Plugin.ObjectTable.LocalPlayer is not { } localPlayer
+                            || localPlayer.CompanyTag.TextValue.Length > 0;
+
         foreach (var tab in snapshot)
         {
+            if (!inFreeCompany && IsFcOnlyTab(tab))
+            {
+                // A selection targeting the hidden tab (Alt+F without an FC)
+                // would linger unconsumed and block focus handling.
+                if (selectTabId == tab.Id)
+                    selectTabId = null;
+                continue;
+            }
+
             // Constant label (badge drawn as an overlay) so tab widths never
             // jump when unread counts appear and disappear. The trailing
             // spaces reserve room for the badge; tell tabs lead with spaces
@@ -678,6 +694,13 @@ public class MainWindow : Window, IDisposable
         if (selectTabId is { } pending && Array.TrueForAll(snapshot, t => t.Id != pending))
             selectTabId = null;
     }
+
+    /// <summary>True when every channel of the tab is Free Company chat.</summary>
+    private static bool IsFcOnlyTab(TabState tab) =>
+        !tab.IsTell
+        && !tab.CatchAll
+        && tab.Channels is { Count: > 0 } channels
+        && channels.All(c => c == XivChatType.FreeCompany);
 
     private const string PlayerContextPopup = "player-context";
     private uint tabContextPopupId;
