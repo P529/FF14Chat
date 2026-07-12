@@ -136,10 +136,13 @@ state of what actually works.
   full-width-window case, ChatTwo-style input preview line.
 
 ## State of the tree
-- Public at https://github.com/P529/FF14Chat; latest release **v0.2.0**
-  (2026-07-12): the v3 feature round (item linking, native tooltips +
-  context menu, role colors/job icons, game keybinds, QoL batch) — details
-  in "Added 2026-07-12" above.
+- Public at https://github.com/P529/FF14Chat; latest release **v0.2.1**
+  (2026-07-12): hidden tabs (FC tab without a free company, or during the
+  login frames where CompanyTag reads empty) no longer lose their saved
+  position — SetOrder used to sort absent tabs to the end and persist it.
+- **v0.2.0** (2026-07-12): the v3 feature round (item linking, native
+  tooltips + context menu, role colors/job icons, game keybinds, QoL
+  batch) — details in "Added 2026-07-12" above.
 - Previous release **v0.1.2** (2026-07-11). Releases are cut by pushing a
   `v*` tag matching the csproj `<Version>`; users on the custom-repo URL
   auto-update in game.
