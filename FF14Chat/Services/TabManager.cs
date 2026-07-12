@@ -187,13 +187,19 @@ public sealed class TabManager
         var changed = false;
         lock (gate)
         {
-            var sorted = tabs
-                .OrderBy(t =>
-                {
-                    var index = orderedIds.IndexOf(t.Id);
-                    return index < 0 ? int.MaxValue : index;
-                })
+            // Tabs absent from the display order (hidden, e.g. the FC tab
+            // without a free company) keep their current slot; only the
+            // listed ones reorder among themselves. Sorting absentees to the
+            // end here would persist that position and lose theirs.
+            var listed = tabs
+                .Where(t => orderedIds.Contains(t.Id))
+                .OrderBy(t => orderedIds.IndexOf(t.Id))
                 .ToList();
+
+            var sorted = new List<TabState>(tabs.Count);
+            var next = 0;
+            foreach (var tab in tabs)
+                sorted.Add(orderedIds.Contains(tab.Id) ? listed[next++] : tab);
 
             if (!sorted.SequenceEqual(tabs))
             {
