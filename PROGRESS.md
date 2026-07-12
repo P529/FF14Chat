@@ -5,7 +5,7 @@ autocompletion, persistent history. Personal use, sideloaded. `PLAN.md` holds
 the original milestones and the v2 feature round; this file is the running
 state of what actually works.
 
-## Current feature set (as of 2026-07-11)
+## Current feature set (as of 2026-07-12)
 
 ### Core
 - Replaces vanilla chat (hides it while active; restores on close/cutscenes).
@@ -14,7 +14,8 @@ state of what actually works.
   scrolling for overflowing tab strips.
 - Auto-spawned tell tab per conversation partner (`Name@World`), closable,
   history backfilled, closed tabs stay closed until the partner chats again.
-- SQLite history (30-day retention), hydrated on load with game timestamps;
+- SQLite history (configurable retention: session-only → forever, default
+  30 days; DB size shown in settings), hydrated on load with game timestamps;
   battle-log spam filtered at capture and purged from old databases.
 - Sending via the game's chat box entry point; per-tab send channel
   (`/p` in Party, `/fc` in FC, `/tell` in tell tabs), 500-byte cap, sanitized.
@@ -79,27 +80,69 @@ state of what actually works.
   Friend installs it as a dev plugin (extract → /xlsettings → Experimental →
   Dev Plugin Locations → enable in /xlplugins).
 
+### Added 2026-07-12 (v0.2.0)
+- **Item linking end to end** — inventory "Link" inserts `<item>` into our
+  input (vanilla append/replace semantics); the placeholder renders blue
+  inline via a transparent-InputText overlay repaint with its own caret, and
+  a preview line above the input names the staged item. Mechanism notes in
+  PLAN.md; the `<item>` string arrives in the 0x0C activation's AtkValues.
+- **Native item tooltips + context menu** — hovering an item link opens the
+  game's own ItemDetail tooltip (positioned beside the window: native UI
+  always renders under ImGui, overlap would hide it; hard-clamped on
+  screen). Left/right click opens a vanilla-style menu: Try On, Item
+  Comparison, Search for Item, Search Recipes, Link, Copy Name. Toggle in
+  settings; custom card stays as fallback.
+- **Role colors + job icons in party chat** — sender job resolved from the
+  party list at capture time, persisted per message (`sender_job`); rendered
+  as tank/healer/DPS prefix color + framed job icon, both optional.
+- **Game chat keybinds honored** — Alt+R reply, Alt+P party, Alt+F FC,
+  say/yell/shout/alliance/PvP/novice, LS/CWLS 1-8 (+ "always" twins), read
+  live from the game's keybind config. Works with and without our input
+  focused (dual poll: framework-update via KeyState, draw-time via ImGui —
+  Dalamud suppresses game keys while ImGui captures). Channel binds also
+  select the matching tab (dedicated tab first, else a game-channel tab).
+- **QoL round** — clickable URLs; duplicate-message collapse (×N, option);
+  12/24h timestamp display; per-channel color overrides; history search
+  (History settings tab, own read connection); retention setting + DB size;
+  auto-hide rules (cutscene/UI-hidden defaults on, loading/combat opt-in);
+  settings restructured into General/Colors/History tabs.
+- **Fixes** — FC-only tabs hidden while the character has no FC; tells no
+  longer leak into catch-all tabs when unticked from General/All (channel
+  grid is the "what shows in General" control, combined All inherits it).
+
 ## Known gaps / accepted quirks
 - Friend-list refresh runs every 60 s → presence dot can lag up to a minute
   after opening a tab or a friend logging off.
 - Cross-world party invites from the context menu may fail (no content id
   available from chat payloads); Add Friend / Blacklist not implemented.
-- 300 ms capture dedup can swallow a genuinely repeated identical message.
-- Enter/`/` interception assumes default keybinds.
+- 300 ms capture dedup can swallow a genuinely repeated identical message
+  (visually mitigated by the ×N duplicate collapse).
+- Enter interception itself still assumes the default Enter key; the chat
+  *channel* keybinds are now read from the game config.
 - ChatLog activation hook is signature-based — a game patch can kill it
   (plugin still loads; vanilla input focus just stops being suppressed).
+  The ItemDetail tooltip open pokes two unnamed agent bytes — equally
+  patch-fragile (see NativeItemTooltip.cs).
+- Reply keybind opens the most recent tell tab; no partner cycling like
+  vanilla's forward/back rotation. LS/CWLS *rotation* binds skipped.
+- Native tooltip slides behind the chat when the window leaves no side room
+  (layering limit: game UI renders under ImGui, unavoidable).
 - Older audit notes in PLAN.md still apply (CWLS shared colors, stale
-  config ids, no native item tooltip).
+  config ids).
 
 ## Next up
-- v2 feature round complete (tab editor + /tell autocomplete were the last
-  two items). Pending in-game verification of both.
-- Deferred: history search (data layer ready). Rejected: presence tooltip.
+- v3 feature round complete (see PLAN.md). Candidates for next: reply
+  partner cycling, richer custom tooltip card (stats/materia) for the
+  full-width-window case, ChatTwo-style input preview line.
 
 ## State of the tree
-- Public at https://github.com/P529/FF14Chat; latest release **v0.1.2**
-  (2026-07-11). Releases are cut by pushing a `v*` tag matching the csproj
-  `<Version>`; users on the custom-repo URL auto-update in game.
+- Public at https://github.com/P529/FF14Chat; latest release **v0.2.0**
+  (2026-07-12): the v3 feature round (item linking, native tooltips +
+  context menu, role colors/job icons, game keybinds, QoL batch) — details
+  in "Added 2026-07-12" above.
+- Previous release **v0.1.2** (2026-07-11). Releases are cut by pushing a
+  `v*` tag matching the csproj `<Version>`; users on the custom-repo URL
+  auto-update in game.
 - Post-v0.1.1 fixes in v0.1.2: programmatic tab switching to earlier-drawn
   tabs (backward Shift+Tab, wrap-around) never applied — `selectTabId` is now
   consumed-on-apply and fixed tabs receive the SetSelected flag too; history
