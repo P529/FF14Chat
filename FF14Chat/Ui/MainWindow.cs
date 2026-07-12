@@ -440,6 +440,14 @@ public class MainWindow : Window, IDisposable
         themeStyles = null;
         themeColors?.Dispose();
         themeColors = null;
+
+        // Native tooltip follows hover with a small grace so the gap between
+        // two words of the same link doesn't flicker it closed.
+        if (nativeTooltipItem != 0 && --nativeTooltipGrace <= 0)
+        {
+            NativeItemTooltip.Close();
+            nativeTooltipItem = 0;
+        }
     }
 
     /// <summary>
@@ -491,6 +499,14 @@ public class MainWindow : Window, IDisposable
         // state is suppressed — the draw-time ImGui-source poll takes over.
         if (IsOpen && !ImGui.GetIO().WantTextInput && DrawConditions())
             gameKeybinds.Poll(this, fromImGui: false);
+
+        // Window hidden mid-hover (cutscene, toggle) skips PostDraw, which
+        // would leave the game tooltip stranded on screen.
+        if (nativeTooltipItem != 0 && (!IsOpen || !DrawConditions()))
+        {
+            NativeItemTooltip.Close();
+            nativeTooltipItem = 0;
+        }
 
         // Hide vanilla chat while we're replacing it; restore it exactly once
         // when we stop, so cutscene/logout visibility stays the game's call.
@@ -582,6 +598,9 @@ public class MainWindow : Window, IDisposable
         // field holds the keyboard (game key state is suppressed then).
         if (ImGui.GetIO().WantTextInput)
             gameKeybinds.Poll(this, fromImGui: true);
+
+        mainWindowPos = ImGui.GetWindowPos();
+        mainWindowSize = ImGui.GetWindowSize();
 
         localFullName = Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? string.Empty;
         var firstSpace = localFullName.IndexOf(' ');
@@ -1143,6 +1162,7 @@ public class MainWindow : Window, IDisposable
         // Hashed at the log child's root scope; DrawToken opens it from
         // within message rows, DrawPlayerContextMenu below begins it here.
         logContextPopupId = ImGui.GetID(PlayerContextPopup);
+        itemContextPopupId = ImGui.GetID(ItemContextPopup);
 
         var messages = tabs.MessagesSnapshot(tab);
         // First draw of a tab (e.g. history just hydrated) starts pinned.
@@ -1195,9 +1215,71 @@ public class MainWindow : Window, IDisposable
         }
 
         DrawPlayerContextMenu();
+        DrawItemContextMenu();
 
         if (pinnedToBottom && newMessages)
             ImGui.SetScrollHereY(1f);
+    }
+
+    private const string ItemContextPopup = "item-context";
+    private uint itemContextPopupId;
+    private SegmentLink.Item? contextItem;
+
+    private uint nativeTooltipItem;
+    private int nativeTooltipGrace;
+    private Vector2 mainWindowPos;
+    private Vector2 mainWindowSize;
+
+    /// <summary>Vanilla-style actions for a clicked item link.</summary>
+    private void DrawItemContextMenu()
+    {
+        if (contextItem is not { } item)
+            return;
+
+        using var popup = ImRaii.Popup(ItemContextPopup);
+        if (!popup.Success)
+            return;
+
+        var name = item.Name ?? $"Item #{item.ItemId}";
+
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.GoldBright))
+        {
+            ImGui.TextUnformatted(item.Hq ? $"{name} {SeIconChar.HighQuality.ToIconChar()}" : name);
+        }
+
+        ImGui.Separator();
+
+        // Event/key items (2M+) only support linking and copying.
+        var normalItem = item.ItemId < 500_000;
+        var equippable = normalItem
+                         && Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>()
+                             .TryGetRow(item.ItemId, out var row)
+                         && row.EquipSlotCategory.RowId != 0;
+
+        if (equippable)
+        {
+            if (ImGui.Selectable("Try On"))
+                ItemActions.TryOn(item.ItemId);
+            if (ImGui.Selectable("Item Comparison"))
+                ItemActions.Compare(item.ItemId);
+        }
+
+        if (normalItem)
+        {
+            if (ImGui.Selectable("Search for Item"))
+                ItemActions.SearchForItem(item.ItemId);
+            if (ImGui.Selectable("Search Recipes Using This Material"))
+                ItemActions.SearchRecipes(item.ItemId);
+        }
+
+        if (ImGui.Selectable("Link"))
+            ItemActions.Link(item.ItemId);
+
+        if (ImGui.Selectable("Copy Item Name"))
+        {
+            ImGui.SetClipboardText(name);
+            Notify($"Copied \"{name}\"");
+        }
     }
 
     /// <summary>Dim centered "— Tuesday, July 8 —" rule between messages of different days.</summary>
@@ -2001,12 +2083,26 @@ public class MainWindow : Window, IDisposable
         switch (link)
         {
             case SegmentLink.Item item:
-                DrawItemTooltip(item);
-                if (clicked)
+                if (plugin.Configuration.NativeItemTooltips)
                 {
-                    var name = item.Name ?? $"Item #{item.ItemId}";
-                    ImGui.SetClipboardText(name);
-                    Notify($"Copied \"{name}\"");
+                    var rawId = item.ItemId + (item.Hq ? 1_000_000u : 0u);
+                    nativeTooltipGrace = 2;
+                    if (nativeTooltipItem != rawId && NativeItemTooltip.Open(rawId))
+                        nativeTooltipItem = rawId;
+                    if (nativeTooltipItem == rawId)
+                        NativeItemTooltip.Reposition(mainWindowPos, mainWindowSize);
+                    else
+                        DrawItemTooltip(item);
+                }
+                else
+                {
+                    DrawItemTooltip(item);
+                }
+
+                if (clicked || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                {
+                    contextItem = item;
+                    ImGui.OpenPopup(itemContextPopupId);
                 }
 
                 break;

@@ -240,6 +240,16 @@ public class SettingsWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Consecutive identical lines show once with a ×N counter.");
 
+        var nativeTooltips = config.NativeItemTooltips;
+        if (ImGui.Checkbox("Native item tooltips", ref nativeTooltips))
+        {
+            config.NativeItemTooltips = nativeTooltips;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The game's own tooltip on item links instead of the plugin's card.");
+
         SectionHeader("Tabs");
 
         // The combined tab is keyed off tabs literally named General/System;

@@ -87,6 +87,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Collapse consecutive identical lines into one with a counter.</summary>
     public bool CollapseDuplicates { get; set; } = true;
 
+    /// <summary>Game's own ItemDetail tooltip on item links instead of the custom card.</summary>
+    public bool NativeItemTooltips { get; set; } = true;
+
     /// <summary>History retention: -1 forever, 0 wiped on every load, else days.</summary>
     public int RetentionDays { get; set; } = 30;
 

@@ -134,7 +134,8 @@ public sealed class TabManager
                     }
                 }
 
-                if (!anyMatch && !ChatTypes.IsBattleSpam(message.Type))
+                // Same tell exclusion as Route: tells live in tell tabs.
+                if (!anyMatch && message.TellPartner == null && !ChatTypes.IsBattleSpam(message.Type))
                 {
                     foreach (var tab in fixedTabs)
                     {
@@ -237,7 +238,9 @@ public sealed class TabManager
             // Unclassified non-combat messages (join notices, obtain lines,
             // unnamed system kinds) land in the catch-all tab. Combat kinds
             // stay out (also guards old persisted rows during hydration).
-            if (!anyFixedMatch && !ChatTypes.IsBattleSpam(message.Type))
+            // Tells always live in their tell tab, so a fixed tab that has
+            // tell channels unticked must not get them back via catch-all.
+            if (!anyFixedMatch && message.TellPartner == null && !ChatTypes.IsBattleSpam(message.Type))
             {
                 foreach (var tab in tabs)
                 {
