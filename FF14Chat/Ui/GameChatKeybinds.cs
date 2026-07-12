@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
@@ -68,9 +69,18 @@ internal sealed class GameChatKeybinds
     }
 
     private readonly Dictionary<string, (KeyCombo A, KeyCombo B)> binds = [];
-    private long lastRefresh = long.MinValue;
 
-    public unsafe void Poll(MainWindow window, bool imguiTextInputActive)
+    // 0, not long.MinValue: TickCount64 - MinValue overflows negative and
+    // the refresh would never fire.
+    private long lastRefresh;
+
+    /// <param name="fromImGui">
+    /// False: framework-update poll via game KeyState (runs before the game's
+    /// input dispatch). True: draw-time poll via ImGui key events — needed
+    /// while our input field is focused, because Dalamud suppresses game key
+    /// state whenever ImGui captures the keyboard.
+    /// </param>
+    public unsafe void Poll(MainWindow window, bool fromImGui)
     {
         if (!Plugin.ClientState.IsLoggedIn)
             return;
@@ -86,9 +96,13 @@ internal sealed class GameChatKeybinds
         if (atkModule == null || atkModule->AtkModule.IsTextInputActive())
             return;
 
-        var modifiers = (Plugin.KeyState[VirtualKey.SHIFT] ? 1 : 0)
-                        | (Plugin.KeyState[VirtualKey.CONTROL] ? 2 : 0)
-                        | (Plugin.KeyState[VirtualKey.MENU] ? 4 : 0);
+        var modifiers = fromImGui
+            ? (ImGui.GetIO().KeyShift ? 1 : 0)
+              | (ImGui.GetIO().KeyCtrl ? 2 : 0)
+              | (ImGui.GetIO().KeyAlt ? 4 : 0)
+            : (Plugin.KeyState[VirtualKey.SHIFT] ? 1 : 0)
+              | (Plugin.KeyState[VirtualKey.CONTROL] ? 2 : 0)
+              | (Plugin.KeyState[VirtualKey.MENU] ? 4 : 0);
 
         // Of all matching combos, the one with the most modifiers wins
         // (Ctrl+Alt+X must beat a plain Alt+X bound elsewhere).
@@ -108,22 +122,37 @@ internal sealed class GameChatKeybinds
 
                 // While typing, only Ctrl/Alt combos may fire; bare keys and
                 // Shift+key belong to the input field.
-                if (imguiTextInputActive && (candidate.Modifiers & ~1) == 0)
+                if (fromImGui && (candidate.Modifiers & ~1) == 0)
                     return;
 
-                if (!Plugin.KeyState.IsVirtualKeyValid(candidate.Key) || !Plugin.KeyState[candidate.Key])
+                if (!KeyPressed(candidate.Key))
                     return;
 
                 var bits = BitOperations.PopCount((uint)candidate.Modifiers);
                 if (best == null || bits >= best.Value.Bits)
                     best = (candidate.Key, bindAction, bits);
             }
+
+            bool KeyPressed(VirtualKey key)
+            {
+                if (fromImGui)
+                {
+                    var imguiKey = Dalamud.Interface.Utility.ImGuiHelpers.VirtualKeyToImGuiKey(key);
+                    return imguiKey != ImGuiKey.None && ImGui.IsKeyPressed(imguiKey, false);
+                }
+
+                return Plugin.KeyState.IsVirtualKeyValid(key) && Plugin.KeyState[key];
+            }
         }
 
         if (best is not { } hit)
             return;
 
-        Plugin.KeyState[hit.Key] = false;
+        Plugin.Log.Debug(
+            "Game keybind hit: source={Source} key={Key} mods={Mods} action={Action} channel={Channel}",
+            fromImGui ? "imgui" : "game", hit.Key, modifiers, hit.Action.Kind, hit.Action.Channel);
+        if (Plugin.KeyState.IsVirtualKeyValid(hit.Key))
+            Plugin.KeyState[hit.Key] = false;
         switch (hit.Action.Kind)
         {
             case ActionKind.Focus:

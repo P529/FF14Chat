@@ -484,6 +484,14 @@ public class MainWindow : Window, IDisposable
 
     private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
+        // Keybinds are polled here, not at draw time: framework update runs
+        // before the game's own input dispatch, so keys the game would
+        // consume and clear (Alt+R reply) are still visible and can be
+        // swallowed first. While ImGui captures the keyboard the game key
+        // state is suppressed — the draw-time ImGui-source poll takes over.
+        if (IsOpen && !ImGui.GetIO().WantTextInput && DrawConditions())
+            gameKeybinds.Poll(this, fromImGui: false);
+
         // Hide vanilla chat while we're replacing it; restore it exactly once
         // when we stop, so cutscene/logout visibility stays the game's call.
         // While the game's own chat input is focused (reply flows, the '/'
@@ -570,7 +578,10 @@ public class MainWindow : Window, IDisposable
         if (!plugin.Configuration.PlacedAtVanillaChat)
             TryPlaceAtVanillaChat();
 
-        gameKeybinds.Poll(this, ImGui.GetIO().WantTextInput);
+        // Counterpart of the framework-update poll for when our own input
+        // field holds the keyboard (game key state is suppressed then).
+        if (ImGui.GetIO().WantTextInput)
+            gameKeybinds.Poll(this, fromImGui: true);
 
         localFullName = Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? string.Empty;
         var firstSpace = localFullName.IndexOf(' ');
@@ -1281,8 +1292,48 @@ public class MainWindow : Window, IDisposable
             empty->Dtor(true);
         }
 
+        // The channel's dedicated tab (Party, FC, …) is always selected when
+        // one exists. Channels without one (yell, linkshells, …) fall back
+        // to the first tab following the game's active channel (General),
+        // but only when the current tab can't send there.
+        var commands = ChannelSendCommands(channel);
+        var snapshot = tabs.Snapshot();
+        var target = Array.Find(snapshot, t => !t.IsTell && MatchesCommand(t.SendCommand, commands));
+        if (target == null && inputTab is not { IsTell: false, SendCommand: null })
+            target = Array.Find(snapshot, t => !t.IsTell && t.SendCommand == null);
+
+        if (target != null)
+            selectTabId = target.Id;
+
         focusInput = true;
+
+        static bool MatchesCommand(string? sendCommand, string[]? commands)
+        {
+            if (sendCommand == null || commands == null)
+                return false;
+
+            foreach (var command in commands)
+            {
+                if (sendCommand.Equals(command, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
     }
+
+    /// <summary>Send commands equivalent to a RaptureShell channel number, null if none.</summary>
+    private static string[]? ChannelSendCommands(int channel) => channel switch
+    {
+        1 => ["/s", "/say"],
+        2 => ["/p", "/party"],
+        3 => ["/a", "/alliance"],
+        4 => ["/y", "/yell"],
+        5 => ["/sh", "/shout"],
+        6 => ["/fc", "/freecompany"],
+        8 => ["/n", "/novice"],
+        _ => null,
+    };
 
     private void SwitchToNextTab(TabState current, int direction)
     {
