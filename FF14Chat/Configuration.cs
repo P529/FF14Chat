@@ -75,6 +75,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Highlight log lines that mention the local player's name.</summary>
     public bool HighlightMentions { get; set; } = true;
 
+    /// <summary>Color party/alliance sender names by their combat role.</summary>
+    public bool RoleColorPartyNames { get; set; } = true;
+
+    /// <summary>Job icon in front of party/alliance sender names.</summary>
+    public bool JobIconPartyNames { get; set; } = true;
+
     /// <summary>Legacy pre-v2 flag; superseded by <see cref="Theme"/>.</summary>
     public bool MutedTheme { get; set; } = true;
 

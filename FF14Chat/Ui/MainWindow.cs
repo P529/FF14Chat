@@ -1758,7 +1758,17 @@ public class MainWindow : Window, IDisposable
             var senderLink = message.SenderPlayer != null
                 ? new SegmentLink.Player(message.SenderPlayer)
                 : null;
-            DrawSegmentText(prefix + " ", channelColor, senderLink);
+
+            var prefixColor = channelColor;
+            if (message.SenderJob is { } job)
+            {
+                if (plugin.Configuration.JobIconPartyNames)
+                    DrawJobIcon(job);
+                if (plugin.Configuration.RoleColorPartyNames && RoleColor(job) is { } roleColor)
+                    prefixColor = roleColor;
+            }
+
+            DrawSegmentText(prefix + " ", prefixColor, senderLink);
         }
 
         if (message.Segments.Count > 0)
@@ -1777,6 +1787,35 @@ public class MainWindow : Window, IDisposable
         {
             DrawSegmentText(message.Text, channelColor, null);
         }
+    }
+
+    /// <summary>Framed job icon (62100 block) at text height, continuing the line.</summary>
+    private static void DrawJobIcon(uint jobId)
+    {
+        var wrap = Plugin.TextureProvider
+            .GetFromGameIcon(new Dalamud.Interface.Textures.GameIconLookup(62100 + jobId))
+            .GetWrapOrDefault();
+        if (wrap == null)
+            return;
+
+        ImGui.SameLine(0, 4);
+        var size = ImGui.GetTextLineHeight();
+        ImGui.Image(wrap.Handle, new Vector2(size, size));
+    }
+
+    /// <summary>ClassJob.Role: 1 tank, 2 melee, 3 ranged, 4 healer, 0 hand/land.</summary>
+    private static Vector4? RoleColor(uint jobId)
+    {
+        if (!Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().TryGetRow(jobId, out var row))
+            return null;
+
+        return row.Role switch
+        {
+            1 => new Vector4(0.25f, 0.55f, 0.95f, 1f),
+            4 => new Vector4(0.35f, 0.80f, 0.42f, 1f),
+            2 or 3 => new Vector4(0.93f, 0.35f, 0.35f, 1f),
+            _ => null,
+        };
     }
 
     /// <summary>

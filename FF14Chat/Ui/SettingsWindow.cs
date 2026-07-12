@@ -83,6 +83,8 @@ public class SettingsWindow : Window, IDisposable
     {
         var config = plugin.Configuration;
 
+        SectionHeader("Appearance", first: true);
+
         var sizeIndex = Array.IndexOf(FontSizes, config.FontSize);
         if (sizeIndex < 0)
             sizeIndex = 1;
@@ -111,6 +113,60 @@ public class SettingsWindow : Window, IDisposable
             config.Save();
         }
 
+        SectionHeader("Window");
+
+        var hideVanilla = config.HideVanillaChat;
+        if (ImGui.Checkbox("Hide vanilla chat while open", ref hideVanilla))
+        {
+            config.HideVanillaChat = hideVanilla;
+            config.Save();
+        }
+
+        var locked = config.LockWindow;
+        if (ImGui.Checkbox("Lock window position and size", ref locked))
+        {
+            config.LockWindow = locked;
+            config.Save();
+        }
+
+        SectionHeader("Chat display");
+
+        var mentions = config.HighlightMentions;
+        if (ImGui.Checkbox("Highlight messages mentioning you", ref mentions))
+        {
+            config.HighlightMentions = mentions;
+            config.Save();
+        }
+
+        var roleColors = config.RoleColorPartyNames;
+        if (ImGui.Checkbox("Role-colored names in party chat", ref roleColors))
+        {
+            config.RoleColorPartyNames = roleColors;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Tank blue, healer green, DPS red.\nOnly for messages received while in the party.");
+
+        var jobIcons = config.JobIconPartyNames;
+        if (ImGui.Checkbox("Job icon before names in party chat", ref jobIcons))
+        {
+            config.JobIconPartyNames = jobIcons;
+            config.Save();
+        }
+
+        var tellPresence = config.ShowTellPresence;
+        if (ImGui.Checkbox("Online status dot on tell tabs", ref tellPresence))
+        {
+            config.ShowTellPresence = tellPresence;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Green: online, red: AFK, gray: offline, blue: unknown.\nTracked via friend list, party, and nearby players;\nnon-friends who are elsewhere can't be looked up (blue).");
+
+        SectionHeader("Tabs");
+
         // The combined tab is keyed off tabs literally named General/System;
         // without them the flag does nothing, so don't offer it.
         var hasCombinePair = config.Tabs.Exists(t => t.Name is "General" or "System");
@@ -127,40 +183,7 @@ public class SettingsWindow : Window, IDisposable
         if (!hasCombinePair && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip("Requires a tab named \"General\" or \"System\".");
 
-        var tellPresence = config.ShowTellPresence;
-        if (ImGui.Checkbox("Online status dot on tell tabs", ref tellPresence))
-        {
-            config.ShowTellPresence = tellPresence;
-            config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Green: online, red: AFK, gray: offline, blue: unknown.\nTracked via friend list, party, and nearby players;\nnon-friends who are elsewhere can't be looked up (blue).");
-
-        var mentions = config.HighlightMentions;
-        if (ImGui.Checkbox("Highlight messages mentioning you", ref mentions))
-        {
-            config.HighlightMentions = mentions;
-            config.Save();
-        }
-
-        var hideVanilla = config.HideVanillaChat;
-        if (ImGui.Checkbox("Hide vanilla chat while open", ref hideVanilla))
-        {
-            config.HideVanillaChat = hideVanilla;
-            config.Save();
-        }
-
-        var locked = config.LockWindow;
-        if (ImGui.Checkbox("Lock window position and size", ref locked))
-        {
-            config.LockWindow = locked;
-            config.Save();
-        }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        if (ImGui.CollapsingHeader("Tabs"))
+        if (ImGui.CollapsingHeader("Tab editor"))
             DrawTabEditor(config);
 
         ImGui.Spacing();
@@ -168,6 +191,22 @@ public class SettingsWindow : Window, IDisposable
         {
             ImGui.TextUnformatted("History: last 30 days, restored on login.");
         }
+    }
+
+    private static void SectionHeader(string label, bool first = false)
+    {
+        if (!first)
+        {
+            ImGui.Spacing();
+            ImGui.Spacing();
+        }
+
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.GoldBright))
+        {
+            ImGui.TextUnformatted(label);
+        }
+
+        ImGui.Separator();
     }
 
     private void DrawTabEditor(Configuration config)

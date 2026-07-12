@@ -49,6 +49,20 @@ public sealed class MessageDatabase : IDisposable
             command.ExecuteNonQuery();
         }
 
+        // Later addition; SQLite has no ADD COLUMN IF NOT EXISTS.
+        using (var command = connection.CreateCommand())
+        {
+            try
+            {
+                command.CommandText = "ALTER TABLE messages ADD COLUMN sender_job INTEGER";
+                command.ExecuteNonQuery();
+            }
+            catch (SqliteException)
+            {
+                // Column already exists.
+            }
+        }
+
         Prune();
         PurgeBattleSpam();
 
@@ -69,8 +83,8 @@ public sealed class MessageDatabase : IDisposable
     public List<Message> LoadForHydration(int recentLimit, int tellLimit)
     {
         var byId = new SortedDictionary<long, Message>();
-        Collect(byId, "SELECT id, ts, type, sender, text, tell_partner, sender_raw, message_raw FROM messages ORDER BY id DESC LIMIT @limit", recentLimit);
-        Collect(byId, "SELECT id, ts, type, sender, text, tell_partner, sender_raw, message_raw FROM messages WHERE tell_partner IS NOT NULL ORDER BY id DESC LIMIT @limit", tellLimit);
+        Collect(byId, "SELECT id, ts, type, sender, text, tell_partner, sender_raw, message_raw, sender_job FROM messages ORDER BY id DESC LIMIT @limit", recentLimit);
+        Collect(byId, "SELECT id, ts, type, sender, text, tell_partner, sender_raw, message_raw, sender_job FROM messages WHERE tell_partner IS NOT NULL ORDER BY id DESC LIMIT @limit", tellLimit);
         return [.. byId.Values];
     }
 
@@ -102,6 +116,7 @@ public sealed class MessageDatabase : IDisposable
                 MessageRaw = messageRaw,
                 Segments = MessageParser.Parse(parsed),
                 SenderPlayer = MessageParser.ExtractPlayer(SeString.Parse(senderRaw)),
+                SenderJob = reader.IsDBNull(8) ? null : (uint)reader.GetInt64(8),
             };
         }
     }
@@ -160,8 +175,8 @@ public sealed class MessageDatabase : IDisposable
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO messages (ts, type, sender, text, tell_partner, sender_raw, message_raw)
-            VALUES (@ts, @type, @sender, @text, @partner, @senderRaw, @messageRaw)
+            INSERT INTO messages (ts, type, sender, text, tell_partner, sender_raw, message_raw, sender_job)
+            VALUES (@ts, @type, @sender, @text, @partner, @senderRaw, @messageRaw, @senderJob)
             """;
 
         var ts = command.Parameters.Add("@ts", SqliteType.Integer);
@@ -171,6 +186,7 @@ public sealed class MessageDatabase : IDisposable
         var partner = command.Parameters.Add("@partner", SqliteType.Text);
         var senderRaw = command.Parameters.Add("@senderRaw", SqliteType.Blob);
         var messageRaw = command.Parameters.Add("@messageRaw", SqliteType.Blob);
+        var senderJob = command.Parameters.Add("@senderJob", SqliteType.Integer);
 
         foreach (var message in batch)
         {
@@ -181,6 +197,7 @@ public sealed class MessageDatabase : IDisposable
             partner.Value = (object?)message.TellPartner ?? DBNull.Value;
             senderRaw.Value = message.SenderRaw;
             messageRaw.Value = message.MessageRaw;
+            senderJob.Value = (object?)message.SenderJob ?? DBNull.Value;
             command.ExecuteNonQuery();
         }
 

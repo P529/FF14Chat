@@ -145,7 +145,48 @@ public sealed class ChatCapture : IDisposable
             MessageRaw = chatMessage.Message.Encode(),
             SenderPlayer = senderPlayer,
             TellPartner = tellPartner,
+            SenderJob = ResolveSenderJob(chatMessage.LogKind, senderPlayer, senderText),
         };
+
+        // The sender's job is only knowable while they share a party with us,
+        // so it is resolved at capture time and stored on the message; party
+        // composition later has no bearing on what was true when it arrived.
+        static uint? ResolveSenderJob(XivChatType type, string? senderPlayer, string senderText)
+        {
+            if (type is not (XivChatType.Party or XivChatType.CrossParty
+                or XivChatType.Alliance or XivChatType.PvPTeam))
+            {
+                return null;
+            }
+
+            // Own messages carry no player payload; the local player is the
+            // sender when the plain-text name matches.
+            if (Plugin.ObjectTable.LocalPlayer is { } local)
+            {
+                var localName = local.Name.TextValue;
+                if (senderPlayer == null
+                    ? senderText.EndsWith(localName, StringComparison.Ordinal)
+                    : senderPlayer.StartsWith(localName + "@", StringComparison.Ordinal))
+                {
+                    return local.ClassJob.RowId;
+                }
+            }
+
+            if (senderPlayer == null)
+                return null;
+
+            foreach (var member in Plugin.PartyList)
+            {
+                var world = member.World.ValueNullable?.Name.ExtractText();
+                var partner = world is { Length: > 0 }
+                    ? $"{member.Name.TextValue}@{world}"
+                    : member.Name.TextValue;
+                if (partner == senderPlayer)
+                    return member.ClassJob.RowId;
+            }
+
+            return null;
+        }
 
         // A live line from a player proves them online; for tells the sender
         // field holds the partner. (The outgoing echo alone does NOT prove

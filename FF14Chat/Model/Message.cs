@@ -18,6 +18,10 @@ public sealed class Message
     /// <summary>"Name@World" of the sending player when resolvable, null otherwise.</summary>
     public string? SenderPlayer { get; init; }
 
+    /// <summary>ClassJob row id of the sender at the time the message arrived
+    /// (party members only), null when unknown.</summary>
+    public uint? SenderJob { get; init; }
+
     // Original SeString bytes, kept for link/color rendering (M6) and persistence (M5).
     public required byte[] SenderRaw { get; init; }
     public required byte[] MessageRaw { get; init; }
