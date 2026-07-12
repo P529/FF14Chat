@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Numerics;
+using System.Text.RegularExpressions;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Utility;
@@ -9,7 +10,7 @@ using Lumina.Excel.Sheets;
 namespace FF14Chat.Services;
 
 /// <summary>Turns a SeString into styled segments (colors, item/map/player links).</summary>
-public static class MessageParser
+public static partial class MessageParser
 {
     private static readonly Vector4 AutoTranslateColor = new(0.62f, 0.87f, 0.61f, 1f);
 
@@ -70,7 +71,49 @@ public static class MessageParser
             }
         }
 
-        return segments;
+        return LinkifyUrls(segments);
+    }
+
+    [GeneratedRegex(@"(?:https?://|www\.)[^\s<>""]+", RegexOptions.IgnoreCase)]
+    private static partial Regex UrlRegex();
+
+    /// <summary>Splits plain text segments so URLs become clickable link segments.</summary>
+    private static List<MessageSegment> LinkifyUrls(List<MessageSegment> segments)
+    {
+        List<MessageSegment>? result = null;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            var matches = segment.Link == null && segment.Text.Contains('.')
+                ? UrlRegex().Matches(segment.Text)
+                : null;
+            if (matches is not { Count: > 0 })
+            {
+                result?.Add(segment);
+                continue;
+            }
+
+            // First split: copy everything already passed through unchanged.
+            result ??= [.. segments.GetRange(0, i)];
+
+            var consumed = 0;
+            foreach (Match match in matches)
+            {
+                if (match.Index > consumed)
+                    result.Add(segment with { Text = segment.Text[consumed..match.Index] });
+
+                var target = match.Value.StartsWith("www.", System.StringComparison.OrdinalIgnoreCase)
+                    ? "https://" + match.Value
+                    : match.Value;
+                result.Add(segment with { Text = match.Value, Link = new SegmentLink.Url(target) });
+                consumed = match.Index + match.Length;
+            }
+
+            if (consumed < segment.Text.Length)
+                result.Add(segment with { Text = segment.Text[consumed..] });
+        }
+
+        return result ?? segments;
     }
 
     /// <summary>Finds the first player payload and formats it as "Name@World".</summary>

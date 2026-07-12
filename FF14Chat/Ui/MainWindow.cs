@@ -40,6 +40,7 @@ public class MainWindow : Window, IDisposable
     private bool suppressEnterUntilReleased;
 
     private readonly CommandIndex commandIndex = new();
+    private readonly GameChatKeybinds gameKeybinds = new();
     private List<CommandEntry> suggestions = [];
     private int suggestionIndex;
     private string suggestionQuery = string.Empty;
@@ -373,20 +374,33 @@ public class MainWindow : Window, IDisposable
         gameFont = CreateFont();
     }
 
-    /// <summary>Mirror vanilla chat visibility rules: only in the world, UI shown, no cutscene.</summary>
+    /// <summary>Mirror vanilla chat visibility rules; cutscene/UI-hidden/loading/battle are configurable.</summary>
     public override bool DrawConditions()
     {
+        var config = plugin.Configuration;
+
         if (!Plugin.ClientState.IsLoggedIn)
             return false;
-        if (Plugin.GameGui.GameUiHidden)
+        if (Plugin.Condition[ConditionFlag.CreatingCharacter])
             return false;
-        if (Plugin.Condition[ConditionFlag.WatchingCutscene]
-            || Plugin.Condition[ConditionFlag.WatchingCutscene78]
-            || Plugin.Condition[ConditionFlag.OccupiedInCutSceneEvent]
-            || Plugin.Condition[ConditionFlag.CreatingCharacter])
+        if (config.HideWhenUiHidden && Plugin.GameGui.GameUiHidden)
+            return false;
+        if (config.HideDuringCutscenes
+            && (Plugin.Condition[ConditionFlag.WatchingCutscene]
+                || Plugin.Condition[ConditionFlag.WatchingCutscene78]
+                || Plugin.Condition[ConditionFlag.OccupiedInCutSceneEvent]))
         {
             return false;
         }
+
+        if (config.HideInLoadingScreens
+            && (Plugin.Condition[ConditionFlag.BetweenAreas] || Plugin.Condition[ConditionFlag.BetweenAreas51]))
+        {
+            return false;
+        }
+
+        if (config.HideInBattle && Plugin.Condition[ConditionFlag.InCombat])
+            return false;
 
         return true;
     }
@@ -555,6 +569,8 @@ public class MainWindow : Window, IDisposable
     {
         if (!plugin.Configuration.PlacedAtVanillaChat)
             TryPlaceAtVanillaChat();
+
+        gameKeybinds.Poll(this, ImGui.GetIO().WantTextInput);
 
         localFullName = Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? string.Empty;
         var firstSpace = localFullName.IndexOf(' ');
@@ -1108,15 +1124,28 @@ public class MainWindow : Window, IDisposable
             return;
         }
 
+        var collapse = plugin.Configuration.CollapseDuplicates;
         var first = Math.Max(0, messages.Length - MaxRenderedMessages);
         for (var i = first; i < messages.Length; i++)
         {
             if (i > first && messages[i - 1].Timestamp.Date != messages[i].Timestamp.Date)
                 DrawDateSeparator(messages[i].Timestamp);
 
+            // Consecutive identical lines render once with a ×N counter.
+            var repeats = 1;
+            while (collapse
+                   && i + 1 < messages.Length
+                   && messages[i + 1].Type == messages[i].Type
+                   && messages[i + 1].Sender == messages[i].Sender
+                   && messages[i + 1].Text == messages[i].Text)
+            {
+                i++;
+                repeats++;
+            }
+
             var lineStart = ImGui.GetCursorScreenPos();
             var lineWidth = ImGui.GetContentRegionAvail().X;
-            DrawMessage(messages[i]);
+            DrawMessage(messages[i], repeats);
 
             if (IsMention(messages[i]))
             {
@@ -1206,22 +1235,53 @@ public class MainWindow : Window, IDisposable
     private unsafe void CycleGameChannel(int direction)
     {
         var agent = AgentChatLog.Instance();
-        var shell = RaptureShellModule.Instance();
-        if (agent == null || shell == null)
+        if (agent == null)
             return;
 
         var index = Array.IndexOf(ChannelCycle, (int)agent->CurrentChannel);
         var next = ChannelCycle[(index + direction + ChannelCycle.Length) % ChannelCycle.Length];
+        GameKeybindChannel(next, 0);
+    }
+
+    internal void GameKeybindFocus() => focusInput = true;
+
+    internal void GameKeybindSlash()
+    {
+        pendingSlash = true;
+        focusInput = true;
+    }
+
+    /// <summary>Reply: open the tell tab of the most recent tell in either direction.</summary>
+    internal void GameKeybindReply()
+    {
+        var messages = plugin.MessageStore.Snapshot();
+        for (var i = messages.Length - 1; i >= 0; i--)
+        {
+            if (messages[i].TellPartner is { Length: > 0 } partner)
+            {
+                OpenTellTabFor(partner);
+                return;
+            }
+        }
+    }
+
+    internal unsafe void GameKeybindChannel(int channel, uint linkshell)
+    {
+        var shell = RaptureShellModule.Instance();
+        if (shell == null)
+            return;
 
         var empty = Utf8String.FromString(string.Empty);
         try
         {
-            shell->ChangeChatChannel(next, 0, empty, true);
+            shell->ChangeChatChannel(channel, linkshell, empty, true);
         }
         finally
         {
             empty->Dtor(true);
         }
+
+        focusInput = true;
     }
 
     private void SwitchToNextTab(TabState current, int direction)
@@ -1743,11 +1803,14 @@ public class MainWindow : Window, IDisposable
         return true;
     }
 
-    private void DrawMessage(Message message)
+    private void DrawMessage(Message message, int repeats = 1)
     {
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
         {
-            ImGui.TextUnformatted($"[{message.Timestamp:HH:mm}]");
+            var stamp = plugin.Configuration.Use24HourClock
+                ? message.Timestamp.ToString("HH:mm")
+                : message.Timestamp.ToString("h:mm tt");
+            ImGui.TextUnformatted($"[{stamp}]");
         }
 
         var channelColor = ChatColors.For(message.Type);
@@ -1777,7 +1840,7 @@ public class MainWindow : Window, IDisposable
             {
                 // Item/map links stand out even when the game didn't color
                 // them itself, so they read as clickable.
-                var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map
+                var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map or SegmentLink.Url
                     ? ChatColors.Link
                     : channelColor;
                 DrawSegmentText(segment.Text, segment.Color ?? fallback, segment.Link);
@@ -1787,6 +1850,9 @@ public class MainWindow : Window, IDisposable
         {
             DrawSegmentText(message.Text, channelColor, null);
         }
+
+        if (repeats > 1)
+            DrawSegmentText($" ×{repeats}", ChatColors.Timestamp, null);
     }
 
     /// <summary>Framed job icon (62100 block) at text height, continuing the line.</summary>
@@ -1875,6 +1941,12 @@ public class MainWindow : Window, IDisposable
                 ImGui.SetTooltip("Click: open map");
                 if (clicked)
                     Plugin.GameGui.OpenMapWithMapLink(map.Payload);
+                break;
+
+            case SegmentLink.Url url:
+                ImGui.SetTooltip($"{url.Target}\nClick: open in browser");
+                if (clicked)
+                    Dalamud.Utility.Util.OpenLink(url.Target);
                 break;
 
             case SegmentLink.Player player:

@@ -12,6 +12,9 @@ public abstract record SegmentLink
 
     /// <summary>Partner is "Name@World" (or just the name if no world resolved).</summary>
     public sealed record Player(string Partner) : SegmentLink;
+
+    /// <summary>Target carries the scheme ("www." text gets https:// prepended).</summary>
+    public sealed record Url(string Target) : SegmentLink;
 }
 
 /// <summary>

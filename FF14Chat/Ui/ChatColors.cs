@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Game.Text;
 
@@ -11,7 +12,28 @@ public static class ChatColors
     /// <summary>Item/map link text without an explicit color from the game.</summary>
     public static readonly Vector4 Link = new(0.45f, 0.70f, 1.00f, 1f);
 
-    public static Vector4 For(XivChatType type) => type switch
+    private static Dictionary<XivChatType, Vector4> overrides = [];
+
+    /// <summary>Installs the user's per-channel colors (RGBA-packed, from config).</summary>
+    public static void SetOverrides(Dictionary<XivChatType, uint> stored)
+    {
+        var table = new Dictionary<XivChatType, Vector4>(stored.Count);
+        foreach (var (type, rgba) in stored)
+        {
+            table[type] = new Vector4(
+                (rgba & 0xFF) / 255f,
+                ((rgba >> 8) & 0xFF) / 255f,
+                ((rgba >> 16) & 0xFF) / 255f,
+                1f);
+        }
+
+        overrides = table;
+    }
+
+    public static Vector4 For(XivChatType type) =>
+        overrides.TryGetValue(type, out var custom) ? custom : Default(type);
+
+    public static Vector4 Default(XivChatType type) => type switch
     {
         XivChatType.Say => new Vector4(0.97f, 0.97f, 0.97f, 1f),
         XivChatType.Shout => new Vector4(1.00f, 0.73f, 0.44f, 1f),

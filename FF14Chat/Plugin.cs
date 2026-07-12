@@ -134,11 +134,14 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        Ui.ChatColors.SetOverrides(Configuration.ChannelColors);
+
         MessageStore = new MessageStore();
         TabManager = new TabManager(Configuration, MessageStore);
 
         Database = new MessageDatabase(
-            System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "chat.db"));
+            System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "chat.db"),
+            Configuration.RetentionDays);
         HydrateFromDatabase();
 
         Presence = new PresenceTracker(TabManager);

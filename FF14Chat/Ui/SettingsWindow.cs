@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
@@ -57,9 +58,13 @@ public class SettingsWindow : Window, IDisposable
         this.plugin = plugin;
         this.mainWindow = mainWindow;
 
-        Size = new Vector2(320, 200);
+        Size = new Vector2(430, 560);
         SizeCondition = ImGuiCond.FirstUseEver;
-        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.AlwaysAutoResize;
+        SizeConstraints = new WindowSizeConstraints
+        {
+            MinimumSize = new Vector2(380, 300),
+            MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
+        };
     }
 
     public void Dispose() { }
@@ -83,6 +88,31 @@ public class SettingsWindow : Window, IDisposable
     {
         var config = plugin.Configuration;
 
+        using var tabBar = ImRaii.TabBar("##settings");
+        if (!tabBar.Success)
+            return;
+
+        using (var tab = ImRaii.TabItem("General"))
+        {
+            if (tab.Success)
+                DrawGeneralTab(config);
+        }
+
+        using (var tab = ImRaii.TabItem("Colors"))
+        {
+            if (tab.Success)
+                DrawColorsTab(config);
+        }
+
+        using (var tab = ImRaii.TabItem("History"))
+        {
+            if (tab.Success)
+                DrawHistoryTab(config);
+        }
+    }
+
+    private void DrawGeneralTab(Configuration config)
+    {
         SectionHeader("Appearance", first: true);
 
         var sizeIndex = Array.IndexOf(FontSizes, config.FontSize);
@@ -129,6 +159,34 @@ public class SettingsWindow : Window, IDisposable
             config.Save();
         }
 
+        var hideCutscene = config.HideDuringCutscenes;
+        if (ImGui.Checkbox("Hide during cutscenes", ref hideCutscene))
+        {
+            config.HideDuringCutscenes = hideCutscene;
+            config.Save();
+        }
+
+        var hideUiHidden = config.HideWhenUiHidden;
+        if (ImGui.Checkbox("Hide when game UI is hidden", ref hideUiHidden))
+        {
+            config.HideWhenUiHidden = hideUiHidden;
+            config.Save();
+        }
+
+        var hideLoading = config.HideInLoadingScreens;
+        if (ImGui.Checkbox("Hide on loading screens", ref hideLoading))
+        {
+            config.HideInLoadingScreens = hideLoading;
+            config.Save();
+        }
+
+        var hideBattle = config.HideInBattle;
+        if (ImGui.Checkbox("Hide in combat", ref hideBattle))
+        {
+            config.HideInBattle = hideBattle;
+            config.Save();
+        }
+
         SectionHeader("Chat display");
 
         var mentions = config.HighlightMentions;
@@ -165,6 +223,23 @@ public class SettingsWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Green: online, red: AFK, gray: offline, blue: unknown.\nTracked via friend list, party, and nearby players;\nnon-friends who are elsewhere can't be looked up (blue).");
 
+        var clock24 = config.Use24HourClock;
+        if (ImGui.Checkbox("24-hour timestamps", ref clock24))
+        {
+            config.Use24HourClock = clock24;
+            config.Save();
+        }
+
+        var collapseDupes = config.CollapseDuplicates;
+        if (ImGui.Checkbox("Collapse repeated messages", ref collapseDupes))
+        {
+            config.CollapseDuplicates = collapseDupes;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Consecutive identical lines show once with a ×N counter.");
+
         SectionHeader("Tabs");
 
         // The combined tab is keyed off tabs literally named General/System;
@@ -185,13 +260,142 @@ public class SettingsWindow : Window, IDisposable
 
         if (ImGui.CollapsingHeader("Tab editor"))
             DrawTabEditor(config);
+    }
 
+    private void DrawColorsTab(Configuration config)
+    {
         ImGui.Spacing();
         using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim))
         {
-            ImGui.TextUnformatted("History: last 30 days, restored on login.");
+            ImGui.TextWrapped("Message color per channel. Modified channels show a reset button.");
+        }
+
+        foreach (var (group, channels) in ChannelGroups)
+        {
+            SectionHeader(group);
+
+            foreach (var (type, label) in channels)
+            {
+                var color = ChatColors.For(type);
+                if (ImGui.ColorEdit4($"##color-{(ushort)type}", ref color,
+                        ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoAlpha))
+                {
+                    config.ChannelColors[type] = PackRgba(color);
+                    config.Save();
+                    ChatColors.SetOverrides(config.ChannelColors);
+                }
+
+                ImGui.SameLine();
+                using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.For(type)))
+                {
+                    ImGui.TextUnformatted(label);
+                }
+
+                if (config.ChannelColors.ContainsKey(type))
+                {
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"reset##{(ushort)type}"))
+                    {
+                        config.ChannelColors.Remove(type);
+                        config.Save();
+                        ChatColors.SetOverrides(config.ChannelColors);
+                    }
+                }
+            }
         }
     }
+
+    private static uint PackRgba(Vector4 color) =>
+        (uint)(byte)(color.X * 255f + 0.5f)
+        | ((uint)(byte)(color.Y * 255f + 0.5f) << 8)
+        | ((uint)(byte)(color.Z * 255f + 0.5f) << 16)
+        | 0xFF000000;
+
+    private string historyQuery = string.Empty;
+    private List<Services.MessageDatabase.SearchResult> historyResults = [];
+
+    private void DrawHistoryTab(Configuration config)
+    {
+        SectionHeader("Retention", first: true);
+        DrawRetention(config);
+
+        SectionHeader("Search");
+
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputTextWithHint("##history-search", "Search stored history…", ref historyQuery, 200))
+        {
+            var query = historyQuery.Trim();
+            historyResults = query.Length >= 2 ? plugin.Database.Search(query, 200) : [];
+        }
+
+        using var child = ImRaii.Child("##history-results", new Vector2(-1, -1), true);
+        if (!child.Success)
+            return;
+
+        if (historyResults.Count == 0)
+        {
+            using var dim = ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim);
+            ImGui.TextUnformatted(historyQuery.Trim().Length < 2
+                ? "Type at least 2 characters."
+                : "No matches in stored history.");
+            return;
+        }
+
+        foreach (var result in historyResults)
+        {
+            var stamp = result.Timestamp.ToString(config.Use24HourClock ? "MM-dd HH:mm" : "MM-dd h:mm tt");
+            using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+            {
+                ImGui.TextUnformatted($"[{stamp}]");
+            }
+
+            ImGui.SameLine();
+            using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.For(result.Type)))
+            {
+                ImGui.TextWrapped(result.Sender.Length > 0
+                    ? $"{result.Sender}: {result.Text}"
+                    : result.Text);
+            }
+        }
+    }
+
+    private static readonly (int Days, string Label)[] RetentionChoices =
+    [
+        (0, "Session only"), (7, "7 days"), (30, "30 days"),
+        (90, "90 days"), (365, "1 year"), (-1, "Forever"),
+    ];
+
+    private void DrawRetention(Configuration config)
+    {
+        var index = Array.FindIndex(RetentionChoices, c => c.Days == config.RetentionDays);
+        if (index < 0)
+            index = 2;
+
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.Combo("Keep history", ref index,
+                Array.ConvertAll(RetentionChoices, c => c.Label), RetentionChoices.Length))
+        {
+            config.RetentionDays = RetentionChoices[index].Days;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Messages older than this are removed when the plugin loads.\n\"Session only\" starts fresh every launch.");
+
+        ImGui.SameLine();
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim))
+        {
+            ImGui.TextUnformatted(FormatSize(plugin.Database.SizeBytes()));
+        }
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1 << 30 => $"{bytes / (float)(1 << 30):0.0} GB",
+        >= 1 << 20 => $"{bytes / (float)(1 << 20):0.0} MB",
+        >= 1 << 10 => $"{bytes / (float)(1 << 10):0.0} KB",
+        _ => $"{bytes} B",
+    };
 
     private static void SectionHeader(string label, bool first = false)
     {

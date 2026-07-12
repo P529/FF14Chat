@@ -81,6 +81,31 @@ public class Configuration : IPluginConfiguration
     /// <summary>Job icon in front of party/alliance sender names.</summary>
     public bool JobIconPartyNames { get; set; } = true;
 
+    /// <summary>Timestamps as 15:04 instead of 3:04 PM. Display only.</summary>
+    public bool Use24HourClock { get; set; } = true;
+
+    /// <summary>Collapse consecutive identical lines into one with a counter.</summary>
+    public bool CollapseDuplicates { get; set; } = true;
+
+    /// <summary>History retention: -1 forever, 0 wiped on every load, else days.</summary>
+    public int RetentionDays { get; set; } = 30;
+
+    /// <summary>Per-channel color overrides, RGBA-packed (see ChatColors).</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public Dictionary<XivChatType, uint> ChannelColors { get; set; } = [];
+
+    /// <summary>Hide the window during cutscenes.</summary>
+    public bool HideDuringCutscenes { get; set; } = true;
+
+    /// <summary>Hide the window when the game UI is hidden (screenshot mode).</summary>
+    public bool HideWhenUiHidden { get; set; } = true;
+
+    /// <summary>Hide the window on loading screens.</summary>
+    public bool HideInLoadingScreens { get; set; }
+
+    /// <summary>Hide the window while in combat.</summary>
+    public bool HideInBattle { get; set; }
+
     /// <summary>Legacy pre-v2 flag; superseded by <see cref="Theme"/>.</summary>
     public bool MutedTheme { get; set; } = true;
 

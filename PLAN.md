@@ -153,3 +153,28 @@ Deferred: history search (data layer already supports it; revisit if wanted — 
 ## Suggested order of attack
 
 M0 → M1 → M2 gets the "chat with tell tabs" core visible fast (~the first week of evenings). M3 makes it usable, M4 delivers the autocomplete ask, M5 persistence. M6 fidelity is where polish time disappears — timebox it.
+
+## v3 feature round (agreed 2026-07-12), in build order
+
+Decided against: custom fonts, screenshot mode (hide the window instead), chat sounds (ours still play), ChatTwo ecosystem features (webinterface, IPC, ExtraChat, in-chat emotes). Native item tooltips stay in the backlog (patch-fragile agent work).
+
+### A — Quick wins
+1. **Timestamp display option** — storage already keeps absolute `DateTime`; render-side `Use24HourClock` toggle (default on), `HH:mm` vs `h:mm tt`.
+2. **Retention setting + DB size** — `RetentionDays`: 0 = fresh every start (purge on load), -1 = forever, else N days; combo [Session only, 7, 30, 90, 365, Forever]. Show chat.db (+ -wal) file size next to it. Prune() reads the setting; default stays 30.
+3. **Collapse duplicate messages** — render-side in `DrawLog`: consecutive lines with same (Type, Sender, Text) draw once with a dim `×N` counter. Option, default on. Storage untouched.
+4. **Clickable URLs** — `MessageParser` post-pass: regex `https?://` / `www.` runs over text segments → `SegmentLink.Url`; click opens browser (`Dalamud.Utility.Util.OpenLink`), link-blue fallback color, tooltip shows the full URL.
+
+### B — Settings window tab bar
+Restructure settings into ImGui tabs: **General** (current sections) | **Colors** | **History**. Prereq for C and D.
+
+### C — Per-channel custom colors
+`Dictionary<XivChatType, uint>` overrides in config; `ChatColors.For` consults overrides first (static override table refreshed on load/change). Colors tab: channel grid (reuse `ChannelGroups`), `ColorEdit` per channel + reset-to-default; the existing colored checkbox labels double as preview.
+
+### D — History search (settings History tab)
+Text search over stored history: `LIKE` query, newest first, capped (~200 rows). The writer thread owns the main SQLite connection — searches use a second read-only connection (WAL mode already on). Results: timestamp, channel-colored sender + text. Date picker deferred.
+
+### E — Auto-hide rules
+Config bools: hide during cutscenes (on), when game UI hidden (on), in loading screens (off), in battle (off). Early-out in `MainWindow.Draw` via `ICondition` flags / `IGameGui.GameUiHidden`. Vanilla chat stays hidden per existing logic (cutscenes hide it anyway; battle-hide meaning "no chat" is the point of the option).
+
+### F — Respect the game's own chat keybinds
+Alt+R reply, Alt+P party, Alt+F FC, etc. — read the game's keybind config (study ChatTwo `KeybindManager.cs`: `UIInputData` keybind lookup by command name), poll while our input is unfocused and no other text input is active, then switch channel / prefill exactly like the vanilla handler would. Riskiest item (input-focus edge cases), goes last.

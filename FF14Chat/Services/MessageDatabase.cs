@@ -16,15 +16,17 @@ namespace FF14Chat.Services;
 /// </summary>
 public sealed class MessageDatabase : IDisposable
 {
-    private const int RetentionDays = 30;
     private const int BatchSize = 100;
 
     private readonly SqliteConnection connection;
     private readonly BlockingCollection<Message> queue = new(new ConcurrentQueue<Message>());
     private readonly Task writer;
+    private readonly string path;
 
-    public MessageDatabase(string path)
+    /// <param name="retentionDays">-1 keeps forever, 0 wipes at startup, else days.</param>
+    public MessageDatabase(string path, int retentionDays)
     {
+        this.path = path;
         connection = new SqliteConnection($"Data Source={path}");
         connection.Open();
 
@@ -63,10 +65,66 @@ public sealed class MessageDatabase : IDisposable
             }
         }
 
-        Prune();
+        Prune(retentionDays);
         PurgeBattleSpam();
 
         writer = Task.Run(WriteLoop);
+    }
+
+    public readonly record struct SearchResult(
+        DateTime Timestamp, XivChatType Type, string Sender, string Text);
+
+    // The writer thread owns the main connection; searches run on the UI
+    // thread over their own connection (WAL allows concurrent readers).
+    private SqliteConnection? searchConnection;
+
+    /// <summary>Newest-first substring search over stored history.</summary>
+    public List<SearchResult> Search(string query, int limit)
+    {
+        if (searchConnection == null)
+        {
+            searchConnection = new SqliteConnection($"Data Source={path}");
+            searchConnection.Open();
+        }
+
+        var escaped = query
+            .Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+        using var command = searchConnection.CreateCommand();
+        command.CommandText = """
+            SELECT ts, type, sender, text FROM messages
+            WHERE text LIKE @q ESCAPE '\'
+            ORDER BY id DESC LIMIT @limit
+            """;
+        command.Parameters.AddWithValue("@q", $"%{escaped}%");
+        command.Parameters.AddWithValue("@limit", limit);
+
+        var results = new List<SearchResult>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(new SearchResult(
+                DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)).LocalDateTime,
+                (XivChatType)reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetString(3)));
+        }
+
+        return results;
+    }
+
+    /// <summary>Database file size (main + WAL) for the settings display.</summary>
+    public long SizeBytes()
+    {
+        long total = 0;
+        foreach (var suffix in new[] { "", "-wal", "-shm" })
+        {
+            var info = new System.IO.FileInfo(path + suffix);
+            if (info.Exists)
+                total += info.Length;
+        }
+
+        return total;
     }
 
     public void Enqueue(Message message)
@@ -134,6 +192,7 @@ public sealed class MessageDatabase : IDisposable
         }
 
         connection.Dispose();
+        searchConnection?.Dispose();
         queue.Dispose();
     }
 
@@ -204,12 +263,23 @@ public sealed class MessageDatabase : IDisposable
         transaction.Commit();
     }
 
-    private void Prune()
+    private void Prune(int retentionDays)
     {
+        if (retentionDays < 0)
+            return;
+
         using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM messages WHERE ts < @cutoff";
-        command.Parameters.AddWithValue(
-            "@cutoff", DateTimeOffset.UtcNow.AddDays(-RetentionDays).ToUnixTimeMilliseconds());
+        if (retentionDays == 0)
+        {
+            command.CommandText = "DELETE FROM messages";
+        }
+        else
+        {
+            command.CommandText = "DELETE FROM messages WHERE ts < @cutoff";
+            command.Parameters.AddWithValue(
+                "@cutoff", DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeMilliseconds());
+        }
+
         command.ExecuteNonQuery();
     }
 
