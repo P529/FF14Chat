@@ -1031,14 +1031,61 @@ public class MainWindow : Window, IDisposable
     {
         tabs.MarkRead(tab);
 
+        // An armed <item> placeholder shows a preview line above the input;
+        // the log child must leave room for it.
+        drafts.TryGetValue(tab.Id, out var pendingDraft);
+        var linkPreview = pendingDraft?.Contains("<item>", StringComparison.Ordinal) == true
+            ? LinkedItemName()
+            : null;
+        var reserve = ImGui.GetFrameHeightWithSpacing()
+                      + (linkPreview != null ? ImGui.GetTextLineHeightWithSpacing() : 0);
+
         using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(4, 2)))
-        using (var child = ImRaii.Child("##log", new Vector2(-1, -ImGui.GetFrameHeightWithSpacing()), false))
+        using (var child = ImRaii.Child("##log", new Vector2(-1, -reserve), false))
         {
             if (child.Success)
                 DrawLog(tab);
         }
 
+        if (linkPreview != null)
+            ImGui.TextColored(ChatColors.Link, $"{SeIconChar.LinkMarker.ToIconChar()} {linkPreview}");
+
         DrawInput(tab);
+    }
+
+    /// <summary>Name of the item staged behind an armed &lt;item&gt; placeholder, null if none.</summary>
+    private static unsafe string? LinkedItemName()
+    {
+        var agent = AgentChatLog.Instance();
+        if (agent == null)
+            return null;
+
+        var itemId = agent->LinkedItem.ItemId;
+        if (itemId == 0)
+            return null;
+
+        // Linked ids encode the variant: +500k collectible, +1M HQ, 2M+ event item.
+        var hq = itemId is >= 1_000_000 and < 2_000_000;
+        var baseId = itemId switch
+        {
+            < 500_000 => itemId,
+            < 1_000_000 => itemId - 500_000,
+            < 2_000_000 => itemId - 1_000_000,
+            _ => itemId,
+        };
+
+        var name = itemId >= 2_000_000
+            ? Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.EventItem>().TryGetRow(baseId, out var eventItem)
+                ? eventItem.Name.ExtractText()
+                : null
+            : Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().TryGetRow(baseId, out var item)
+                ? item.Name.ExtractText()
+                : null;
+
+        if (string.IsNullOrEmpty(name))
+            return null;
+
+        return hq ? $"{name} {SeIconChar.HighQuality.ToIconChar()}" : name;
     }
 
     private void DrawLog(TabState tab)
@@ -1290,12 +1337,16 @@ public class MainWindow : Window, IDisposable
             }
 
             // Text the game asked to pre-fill into the chat input (e.g. an
-            // emote command from a UI button).
+            // emote command from a UI button, or <item> from the inventory
+            // Link action). Match vanilla: a command replaces the draft, a
+            // placeholder appends to it (once).
             if (pendingInsert is { } insert)
             {
                 pendingInsert = null;
-                if (draft.Length == 0)
+                if (insert.StartsWith('/'))
                     draft = insert;
+                else if (!draft.Contains(insert, StringComparison.Ordinal))
+                    draft += insert;
             }
         }
 
@@ -1306,12 +1357,26 @@ public class MainWindow : Window, IDisposable
                 : "Chat or /command…";
         var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
-        var submitted = ImGui.InputTextWithHint(
-            $"##input{tab.Id}", hint, ref draft, 500,
-            ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory
-            | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion,
-            InputCallback);
+
+        // InputText can't style a substring. With a link placeholder in the
+        // draft, the widget draws its text transparent and the visible text
+        // (placeholders in link blue, own caret) is repainted on top by
+        // DrawInputTextOverlay.
+        var hasLinkPlaceholder = FindLinkPlaceholders(draft).Count > 0;
+
+        bool submitted;
+        using (ImRaii.PushColor(ImGuiCol.Text, Vector4.Zero, hasLinkPlaceholder))
+        {
+            submitted = ImGui.InputTextWithHint(
+                $"##input{tab.Id}", hint, ref draft, 500,
+                ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory
+                | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion,
+                InputCallback);
+        }
         var inputActive = ImGui.IsItemActive();
+
+        if (hasLinkPlaceholder)
+            DrawInputTextOverlay(draft, FindLinkPlaceholders(draft), inputActive);
         inputActiveLastFrame = inputActive;
         drafts[tab.Id] = draft;
 
@@ -1336,6 +1401,100 @@ public class MainWindow : Window, IDisposable
             // Send failed; keep the draft and the focus so it can be fixed.
             ImGui.SetKeyboardFocusHere(-1);
         }
+    }
+
+    private static readonly string[] LinkPlaceholderTokens = ["<item>", "<flag>", "<status>"];
+
+    private static List<(int Start, int Length)> FindLinkPlaceholders(string draft)
+    {
+        List<(int Start, int Length)> spans = [];
+        if (draft.Length == 0)
+            return spans;
+
+        foreach (var token in LinkPlaceholderTokens)
+        {
+            var from = 0;
+            int index;
+            while (from < draft.Length
+                   && (index = draft.IndexOf(token, from, StringComparison.Ordinal)) >= 0)
+            {
+                spans.Add((index, token.Length));
+                from = index + token.Length;
+            }
+        }
+
+        spans.Sort();
+        return spans;
+    }
+
+    /// <summary>
+    /// Repaints the input field's text (drawn transparent by the widget when
+    /// a link placeholder is present): normal runs in the regular text color,
+    /// placeholders in the link color, plus a caret, honoring the field's
+    /// internal horizontal scroll. Must run directly after the InputText so
+    /// the item rect and id still refer to it.
+    /// </summary>
+    private void DrawInputTextOverlay(string draft, List<(int Start, int Length)> spans, bool inputActive)
+    {
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        var pad = ImGui.GetStyle().FramePadding;
+
+        var scrollX = 0f;
+        var cursor = -1;
+        if (inputActive)
+        {
+            var id = ImGuiP.GetItemID();
+            var state = ImGuiP.GetInputTextState(id);
+            if (!state.IsNull && state.ID == id)
+            {
+                scrollX = state.ScrollX;
+                cursor = Math.Clamp(state.Stb.Cursor, 0, draft.Length);
+            }
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.PushClipRect(
+            new Vector2(min.X + pad.X, min.Y),
+            new Vector2(max.X - pad.X, max.Y),
+            true);
+
+        var normalColor = ImGui.GetColorU32(ImGuiCol.Text);
+        var linkColor = ImGui.GetColorU32(ChatColors.Link);
+        var pos = new Vector2(min.X + pad.X - scrollX, min.Y + pad.Y);
+
+        void DrawRun(int start, int end, uint color)
+        {
+            if (end <= start)
+                return;
+
+            var run = draft[start..end];
+            drawList.AddText(pos, color, run);
+            pos.X += ImGui.CalcTextSize(run).X;
+        }
+
+        var previous = 0;
+        foreach (var (start, length) in spans)
+        {
+            DrawRun(previous, start, normalColor);
+            DrawRun(start, start + length, linkColor);
+            previous = start + length;
+        }
+
+        DrawRun(previous, draft.Length, normalColor);
+
+        // The widget's own caret is transparent along with its text; draw a
+        // replacement. Free-running blink (the real one resets on keypress).
+        if (cursor >= 0 && (ImGui.GetTime() % 1.2) <= 0.8)
+        {
+            var x = min.X + pad.X - scrollX + ImGui.CalcTextSize(draft[..cursor]).X;
+            drawList.AddLine(
+                new Vector2(x, min.Y + pad.Y),
+                new Vector2(x, max.Y - pad.Y),
+                normalColor);
+        }
+
+        drawList.PopClipRect();
     }
 
     private static readonly string[] TellCommands = ["/tell", "/t"];
@@ -1605,7 +1764,14 @@ public class MainWindow : Window, IDisposable
         if (message.Segments.Count > 0)
         {
             foreach (var segment in message.Segments)
-                DrawSegmentText(segment.Text, segment.Color ?? channelColor, segment.Link);
+            {
+                // Item/map links stand out even when the game didn't color
+                // them itself, so they read as clickable.
+                var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map
+                    ? ChatColors.Link
+                    : channelColor;
+                DrawSegmentText(segment.Text, segment.Color ?? fallback, segment.Link);
+            }
         }
         else
         {

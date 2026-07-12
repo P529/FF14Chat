@@ -8,6 +8,9 @@ public static class ChatColors
 {
     public static readonly Vector4 Timestamp = new(0.55f, 0.55f, 0.55f, 1f);
 
+    /// <summary>Item/map link text without an explicit color from the game.</summary>
+    public static readonly Vector4 Link = new(0.45f, 0.70f, 1.00f, 1f);
+
     public static Vector4 For(XivChatType type) => type switch
     {
         XivChatType.Say => new Vector4(0.97f, 0.97f, 0.97f, 1f),
