@@ -110,6 +110,23 @@ state of what actually works.
   longer leak into catch-all tabs when unticked from General/All (channel
   grid is the "what shows in General" control, combined All inherits it).
 
+### Added 2026-07-19
+- **Emote shortcodes** — Discord-style `:sob:` in any message renders as a
+  Twemoji image (text-height, hover shows a larger preview + the shortcode).
+  Fully self-contained: the shortcode map (gemoji's alias set, ~1900 names,
+  the same ones Discord uses) and all 1869 referenced Twemoji 72×72 PNGs
+  ship as embedded resources (`Data/emotes.json` + `Data/emotes.zip`,
+  ~1.7 MB) — nothing is ever downloaded. Textures are created lazily per
+  emote from the in-memory zip and disposed on unload. Parsing is a
+  `MessageParser` post-pass, so live capture and DB hydration both get it;
+  the sent text stays a plain `:sob:` for others. Typing `:` + 2 chars pops
+  the existing suggestion popup with emoji icons (prefix matches before
+  substring, Tab/click accepts, mid-sentence safe — the entry carries the
+  whole replacement buffer). Toggle in settings ("Chat display"), default
+  on. Regenerating the assets: gemoji `emoji.json` → alias map, Twemoji
+  release tarball → zip of the mapped codepoint files (name rule: hex
+  codepoints joined by `-`, U+FE0F dropped unless the sequence has a ZWJ).
+
 ## Known gaps / accepted quirks
 - Friend-list refresh runs every 60 s → presence dot can lag up to a minute
   after opening a tab or a friend logging off.

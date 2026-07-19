@@ -156,7 +156,7 @@ M0 → M1 → M2 gets the "chat with tell tabs" core visible fast (~the first we
 
 ## v3 feature round (agreed 2026-07-12), in build order
 
-Decided against: custom fonts, screenshot mode (hide the window instead), chat sounds (ours still play), ChatTwo ecosystem features (webinterface, IPC, ExtraChat, in-chat emotes). Native item tooltips stay in the backlog (patch-fragile agent work).
+Decided against: custom fonts, screenshot mode (hide the window instead), chat sounds (ours still play), ChatTwo ecosystem features (webinterface, IPC, ExtraChat, in-chat emotes — *emotes un-vetoed and built 2026-07-19 as Discord-style `:shortcode:` Twemoji rendering, see PROGRESS.md*). Native item tooltips stay in the backlog (patch-fragile agent work).
 
 ### A — Quick wins
 1. **Timestamp display option** — storage already keeps absolute `DateTime`; render-side `Use24HourClock` toggle (default on), `HH:mm` vs `h:mm tt`.

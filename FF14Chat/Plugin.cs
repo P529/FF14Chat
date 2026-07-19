@@ -174,6 +174,7 @@ public sealed class Plugin : IDalamudPlugin
         ChatCapture.Dispose();
         Presence.Dispose();
         Database.Dispose();
+        Emotes.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
     }

@@ -71,7 +71,63 @@ public static partial class MessageParser
             }
         }
 
-        return LinkifyUrls(segments);
+        return ParseEmotes(LinkifyUrls(segments));
+    }
+
+    /// <summary>Splits plain text segments so known ":shortcode:" runs render as emotes.</summary>
+    private static List<MessageSegment> ParseEmotes(List<MessageSegment> segments)
+    {
+        List<MessageSegment>? result = null;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            var text = segment.Text;
+
+            List<(int Start, int Length, string Emoji)>? hits = null;
+            if (segment.Link == null && text.Length > 2)
+            {
+                var colon = text.IndexOf(':');
+                while (colon >= 0 && colon < text.Length - 2)
+                {
+                    var close = text.IndexOf(':', colon + 1);
+                    if (close < 0)
+                        break;
+
+                    if (close > colon + 1 && Emotes.TryGet(text[(colon + 1)..close], out var emoji))
+                    {
+                        (hits ??= []).Add((colon, close - colon + 1, emoji));
+                        colon = text.IndexOf(':', close + 1);
+                    }
+                    else
+                    {
+                        // The closing colon may open the next emote (":x:sob:").
+                        colon = close;
+                    }
+                }
+            }
+
+            if (hits == null)
+            {
+                result?.Add(segment);
+                continue;
+            }
+
+            result ??= [.. segments.GetRange(0, i)];
+
+            var consumed = 0;
+            foreach (var (start, length, emoji) in hits)
+            {
+                if (start > consumed)
+                    result.Add(segment with { Text = text[consumed..start] });
+                result.Add(segment with { Text = text[start..(start + length)], Emote = emoji });
+                consumed = start + length;
+            }
+
+            if (consumed < text.Length)
+                result.Add(segment with { Text = text[consumed..] });
+        }
+
+        return result ?? segments;
     }
 
     [GeneratedRegex(@"(?:https?://|www\.)[^\s<>""]+", RegexOptions.IgnoreCase)]

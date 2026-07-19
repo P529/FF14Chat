@@ -240,6 +240,16 @@ public class SettingsWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Consecutive identical lines show once with a ×N counter.");
 
+        var emotes = config.RenderEmotes;
+        if (ImGui.Checkbox("Emotes (:sob: shows the emoji)", ref emotes))
+        {
+            config.RenderEmotes = emotes;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Discord-style shortcodes render as emoji images; type : plus two letters for suggestions.\nArtwork: Twemoji (CC-BY 4.0), bundled with the plugin — nothing is downloaded.");
+
         var nativeTooltips = config.NativeItemTooltips;
         if (ImGui.Checkbox("Native item tooltips", ref nativeTooltips))
         {

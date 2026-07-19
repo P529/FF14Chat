@@ -19,8 +19,11 @@ public abstract record SegmentLink
 
 /// <summary>
 /// A run of text with uniform styling. Color null means "use the channel color".
+/// Emote carries the emoji to draw as a Twemoji image; Text then holds the
+/// ":shortcode:" the emoji replaces, kept as the plaintext/render fallback.
 /// </summary>
 public sealed record MessageSegment(
     string Text,
     Vector4? Color,
-    SegmentLink? Link);
+    SegmentLink? Link,
+    string? Emote = null);

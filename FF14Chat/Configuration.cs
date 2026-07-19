@@ -87,6 +87,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Collapse consecutive identical lines into one with a counter.</summary>
     public bool CollapseDuplicates { get; set; } = true;
 
+    /// <summary>Render Discord-style ":shortcode:" emotes as Twemoji images.</summary>
+    public bool RenderEmotes { get; set; } = true;
+
     /// <summary>Game's own ItemDetail tooltip on item links instead of the custom card.</summary>
     public bool NativeItemTooltips { get; set; } = true;
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.2.1.0</Version>
+    <Version>0.2.2.0</Version>
     <!-- Keep the packaged zip free of non-Windows sqlite natives, without
          moving the output path Dalamud's dev plugin registration points at. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -10,6 +10,14 @@
     <Description>Chat replacement: tabbed chat with per-person tell tabs, command autocompletion, persistent history.</Description>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- :sob:-style emotes: shortcode → emoji map (generated from gemoji)
+         and the Twemoji 72x72 PNGs it references, bundled so nothing is
+         ever fetched at runtime. -->
+    <EmbeddedResource Include="Data\emotes.json" />
+    <EmbeddedResource Include="Data\emotes.zip" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />

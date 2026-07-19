@@ -1715,8 +1715,35 @@ public class MainWindow : Window, IDisposable
 
     private static readonly string[] TellCommands = ["/tell", "/t"];
 
+    /// <summary>Trailing ":xx" emote partial with the colon at a word start.</summary>
+    private static readonly System.Text.RegularExpressions.Regex EmotePartial =
+        new(@"(?:^|\s):([\w+\-]{2,})$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private void UpdateSuggestions(string draft, bool inputActive)
     {
+        // Emote completion fires anywhere in the message, including inside a
+        // command's text argument, so it runs before the command logic.
+        if (inputActive && plugin.Configuration.RenderEmotes)
+        {
+            var emote = EmotePartial.Match(draft);
+            if (emote.Success)
+            {
+                if (draft != suggestionQuery)
+                {
+                    suggestionQuery = draft;
+                    var prefix = draft[..emote.Groups[1].Index]; // ends with the colon
+                    suggestions = Emotes.Query(emote.Groups[1].Value, 8)
+                        .Select(e => new CommandEntry(
+                            $"{prefix}{e.Name}:", string.Empty, false,
+                            Display: $":{e.Name}:", Emote: e.Emoji))
+                        .ToList();
+                    suggestionIndex = 0;
+                }
+
+                return;
+            }
+        }
+
         var wantSuggestions = inputActive && draft.Length > 1 && draft[0] == '/';
 
         // "/tell " (or "/t ") switches from command completion to completing
@@ -1827,7 +1854,15 @@ public class MainWindow : Window, IDisposable
         {
             var entry = suggestions[i];
             var selected = i == suggestionIndex;
-            if (ImGui.Selectable($"{entry.Command}##sugg{i}", selected))
+
+            if (entry.Emote != null && Emotes.GetTexture(entry.Emote) is { } emoteWrap)
+            {
+                var iconSize = ImGui.GetTextLineHeight();
+                ImGui.Image(emoteWrap.Handle, new Vector2(iconSize, iconSize));
+                ImGui.SameLine();
+            }
+
+            if (ImGui.Selectable($"{entry.Display ?? entry.Command}##sugg{i}", selected))
             {
                 drafts[tab.Id] = entry.Command + " ";
                 focusInput = true;
@@ -1994,6 +2029,10 @@ public class MainWindow : Window, IDisposable
         {
             foreach (var segment in message.Segments)
             {
+                if (segment.Emote != null && plugin.Configuration.RenderEmotes
+                    && DrawEmoteToken(segment))
+                    continue;
+
                 // Item/map links stand out even when the game didn't color
                 // them itself, so they read as clickable.
                 var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map or SegmentLink.Url
@@ -2009,6 +2048,35 @@ public class MainWindow : Window, IDisposable
 
         if (repeats > 1)
             DrawSegmentText($" ×{repeats}", ChatColors.Timestamp, null);
+    }
+
+    /// <summary>
+    /// Inline Twemoji image at text height, continuing the line like a word
+    /// token. False while the texture is unavailable (downloading/failed), so
+    /// the ":shortcode:" text draws instead.
+    /// </summary>
+    private static bool DrawEmoteToken(MessageSegment segment)
+    {
+        var wrap = Emotes.GetTexture(segment.Emote!);
+        if (wrap == null)
+            return false;
+
+        var size = ImGui.GetTextLineHeight();
+        var lastEnd = ImGui.GetItemRectMax().X;
+        var rightEdge = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
+        if (lastEnd + size <= rightEdge)
+            ImGui.SameLine(0, 0);
+
+        ImGui.Image(wrap.Handle, new Vector2(size, size));
+
+        if (ImGui.IsItemHovered())
+        {
+            using var tooltip = ImRaii.Tooltip();
+            ImGui.Image(wrap.Handle, new Vector2(size * 3, size * 3));
+            ImGui.TextUnformatted(segment.Text);
+        }
+
+        return true;
     }
 
     /// <summary>Framed job icon (62100 block) at text height, continuing the line.</summary>

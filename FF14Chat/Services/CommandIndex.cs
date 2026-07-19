@@ -5,7 +5,17 @@ using Lumina.Excel.Sheets;
 
 namespace FF14Chat.Services;
 
-public sealed record CommandEntry(string Command, string Description, bool FromPlugin);
+/// <summary>
+/// Command holds the full replacement input buffer; Display, when set, is the
+/// shorter label shown in the popup (emote completions replace mid-sentence,
+/// so their Command is the whole draft). Emote is an emoji drawn as an icon.
+/// </summary>
+public sealed record CommandEntry(
+    string Command,
+    string Description,
+    bool FromPlugin,
+    string? Display = null,
+    string? Emote = null);
 
 /// <summary>
 /// Autocomplete source: every native text command (from the game's

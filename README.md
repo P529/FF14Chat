@@ -14,6 +14,7 @@ A chat replacement for Final Fantasy XIV, built as a [Dalamud](https://github.co
 - **Autocomplete** — every game command and emote with descriptions from the game's own data, plugin commands included; `/tell ` completes player names from open tells, party, friends, and nearby players.
 - **Persistent history** — SQLite-backed, 30 days of retention, restored on login with correct game timestamps. Tell conversations survive restarts.
 - **Rendering** — per-channel colors, clickable item/map/player links, item tooltip cards, mention highlighting, date separators, game font, four FFXIV-native themes (Muted Gold, Rich Gold, Classic Blue, FF7 Remake) with an opacity slider.
+- **Emotes** — Discord-style shortcodes (`:sob:`, `:joy:`, ~1900 names) render inline as [Twemoji](https://github.com/jdecked/twemoji) images; typing `:` plus two letters autocompletes. Fully bundled, nothing downloaded; others just see the plain text.
 - **Player context menu** — right-click a name in the log or a tell tab: Send Tell, Target, Examine, Adventurer Plate, Invite to Party, Copy Name.
 
 ## Installing
@@ -98,6 +99,7 @@ For development, register `FF14Chat\bin\Debug\` as a Dev Plugin Location and reb
 | `Services/ChatSender.cs` | Sending via the game's chat box entry point, sanitation |
 | `Services/PresenceTracker.cs` | Online/AFK/offline for tell partners |
 | `Services/CommandIndex.cs` | Autocomplete sources |
+| `Services/Emotes.cs` | `:shortcode:` emotes: bundled Twemoji textures + completion |
 | `Ui/MainWindow.cs` | The chat window: tabs, log, input, links, hooks |
 | `Ui/SettingsWindow.cs` | Settings and the tab editor |
 
@@ -110,6 +112,11 @@ For development, register `FF14Chat\bin\Debug\` as a Dev Plugin Location and reb
 - Cross-world party invites from the context menu may fail (no content id available from chat payloads).
 - IME input (Japanese/Chinese) inside ImGui text fields is rough — a known ImGui limitation.
 - A game patch can break sending or the Send Tell interception until a rebuild (see the update playbook above).
+
+## Credits
+
+- Emoji artwork: [Twemoji](https://github.com/jdecked/twemoji) v15.1.0, copyright Twitter, Inc and other contributors — graphics licensed [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), bundled unmodified as 72×72 PNGs in `FF14Chat/Data/emotes.zip`.
+- Emote shortcode names: the alias list from GitHub's [gemoji](https://github.com/github/gemoji) (MIT), bundled as `FF14Chat/Data/emotes.json`.
 
 ## Disclaimers
 
