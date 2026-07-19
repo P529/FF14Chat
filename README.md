@@ -118,6 +118,8 @@ For development, register `FF14Chat\bin\Debug\` as a Dev Plugin Location and reb
 - Emoji artwork: [Twemoji](https://github.com/jdecked/twemoji) v15.1.0, copyright Twitter, Inc and other contributors — graphics licensed [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), bundled unmodified as 72×72 PNGs in `FF14Chat/Data/emotes.zip`.
 - Emote shortcode names: the alias list from GitHub's [gemoji](https://github.com/github/gemoji) (MIT), bundled as `FF14Chat/Data/emotes.json`.
 
+Both source projects are pinned as submodules under `third_party/` at the exact versions the bundled data was generated from (regenerate: map gemoji `db/emoji.json` aliases → Twemoji `assets/72x72/` codepoint filenames → zip). The submodules are not needed to build — the generated data is committed.
+
 ## Disclaimers
 
 - All Dalamud plugins are technically against the FFXIV Terms of Service. This one is quiet and personal-use; use at your own risk and keep plugin talk out of the game.

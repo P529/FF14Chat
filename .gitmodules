@@ -1,0 +1,8 @@
+[submodule "third_party/twemoji"]
+	path = third_party/twemoji
+	url = https://github.com/jdecked/twemoji.git
+	shallow = true
+[submodule "third_party/gemoji"]
+	path = third_party/gemoji
+	url = https://github.com/github/gemoji.git
+	shallow = true
