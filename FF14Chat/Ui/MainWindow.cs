@@ -47,6 +47,9 @@ public class MainWindow : Window, IDisposable
 
     private string? selectTabId;
 
+    // FC membership latch: sticky until logout (see the tab-bar FC check).
+    private bool fcSeen;
+
     private bool enterWasDown;
     private bool slashWasDown;
     private bool pendingSlash;
@@ -633,11 +636,16 @@ public class MainWindow : Window, IDisposable
         imguiIdToTabId.Clear();
         var snapshot = tabs.Snapshot();
 
-        // FC-only tabs are pointless without a free company. CompanyTag is
-        // per character; null player (loading) counts as "in one" so tabs
-        // don't flicker away during login.
-        var inFreeCompany = Plugin.ObjectTable.LocalPlayer is not { } localPlayer
-                            || localPlayer.CompanyTag.TextValue.Length > 0;
+        // FC-only tabs are pointless without a free company. Read membership
+        // from the FC info proxy (see ReadInFreeCompany); a positive result
+        // latches until logout so the tab can't flicker away on transient
+        // unreadable states, and a loading (null) player counts as "in one".
+        if (!Plugin.ClientState.IsLoggedIn)
+            fcSeen = false;
+        else if (ReadInFreeCompany())
+            fcSeen = true;
+
+        var inFreeCompany = fcSeen || Plugin.ObjectTable.LocalPlayer == null;
 
         foreach (var tab in snapshot)
         {
@@ -712,6 +720,26 @@ public class MainWindow : Window, IDisposable
         // would otherwise linger and block focus handling forever.
         if (selectTabId is { } pending && Array.TrueForAll(snapshot, t => t.Id != pending))
             selectTabId = null;
+    }
+
+    /// <summary>
+    /// Whether the local character is in a free company. Primary source is
+    /// the FC info proxy, fed by the zone-init packet — the reason FC chat
+    /// keeps working in instanced duties, where the nameplate CompanyTag
+    /// (the fallback) reads empty.
+    /// </summary>
+    private static unsafe bool ReadInFreeCompany()
+    {
+        var infoModule = FFXIVClientStructs.FFXIV.Client.UI.Info.InfoModule.Instance();
+        var proxy = infoModule == null
+            ? null
+            : (FFXIVClientStructs.FFXIV.Client.UI.Info.InfoProxyFreeCompany*)
+              infoModule->GetInfoProxyById(FFXIVClientStructs.FFXIV.Client.UI.Info.InfoProxyId.FreeCompany);
+        if (proxy != null && proxy->NameString.Length > 0)
+            return true;
+
+        return Plugin.ObjectTable.LocalPlayer is { } player
+               && player.CompanyTag.TextValue.Length > 0;
     }
 
     /// <summary>True when every channel of the tab is Free Company chat.</summary>

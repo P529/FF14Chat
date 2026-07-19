@@ -126,6 +126,13 @@ state of what actually works.
   on. Regenerating the assets: gemoji `emoji.json` → alias map, Twemoji
   release tarball → zip of the mapped codepoint files (name rule: hex
   codepoints joined by `-`, U+FE0F dropped unless the sequence has a ZWJ).
+- **Fix: FC tab no longer vanishes in duties** — the auto-hide trusted
+  the nameplate `CompanyTag`, which the game blanks inside instanced
+  content. Membership is now read from `InfoProxyFreeCompany` (its name
+  field is fed by the zone-init packet — the same reason FC chat keeps
+  working in duties), with the tag as fallback; a positive result
+  latches until logout so transient unreadable states can't hide the
+  tab.
 
 ## Known gaps / accepted quirks
 - Friend-list refresh runs every 60 s → presence dot can lag up to a minute
