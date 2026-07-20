@@ -270,6 +270,11 @@ public class SettingsWindow : Window, IDisposable
 
     private string historyQuery = string.Empty;
     private List<Services.MessageDatabase.SearchResult> historyResults = [];
+    private DateTime historySearchDue = DateTime.MaxValue;
+
+    /// <summary>Typing pause before the search runs — a LIKE '%q%' query is a
+    /// full table scan; per-keystroke it would hitch the render thread.</summary>
+    private static readonly TimeSpan SearchDebounce = TimeSpan.FromMilliseconds(300);
 
     private void DrawHistoryTab(Configuration config)
     {
@@ -280,7 +285,11 @@ public class SettingsWindow : Window, IDisposable
 
         ImGui.SetNextItemWidth(-1);
         if (ImGui.InputTextWithHint("##history-search", "Search stored history…", ref historyQuery, 200))
+            historySearchDue = DateTime.Now + SearchDebounce;
+
+        if (DateTime.Now >= historySearchDue)
         {
+            historySearchDue = DateTime.MaxValue;
             var query = historyQuery.Trim();
             historyResults = query.Length >= 2 ? plugin.Database.Search(query, 200) : [];
         }
@@ -307,7 +316,7 @@ public class SettingsWindow : Window, IDisposable
             }
 
             ImGui.SameLine();
-            using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.For(result.Type)))
+            using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.For(Services.ChatTypes.Mask(result.Type))))
             {
                 ImGui.TextWrapped(result.Sender.Length > 0
                     ? $"{result.Sender}: {result.Text}"

@@ -11,8 +11,10 @@ using Microsoft.Data.Sqlite;
 namespace FF14Chat.Services;
 
 /// <summary>
-/// SQLite-backed chat history. Writes happen on a single background thread;
-/// reads only occur during startup hydration, before the writer has traffic.
+/// SQLite-backed chat history. Writes happen on a single background thread
+/// that owns the main connection; startup reads (hydration, partner prune)
+/// run before the writer has traffic, and later reads (history search) use
+/// a separate read-only connection under WAL.
 /// </summary>
 public sealed class MessageDatabase : IDisposable
 {

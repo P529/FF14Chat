@@ -235,7 +235,17 @@ public class MainWindow : Window, IDisposable
     private unsafe nint ChangeChannelNameDetour(AgentChatLog* agent)
     {
         var result = changeChannelNameHook.Original(agent);
-        ScheduleTellTabSync(includeStaged: false);
+
+        // Same rule as the other detours: nothing may throw into game code.
+        try
+        {
+            ScheduleTellTabSync(includeStaged: false);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "ChangeChannelName sync failed");
+        }
+
         return result;
     }
 
@@ -695,7 +705,12 @@ public class MainWindow : Window, IDisposable
                 }
 
                 if (!open)
+                {
                     tabs.Close(tab);
+
+                    // Or reopening this partner later resurrects a stale draft.
+                    drafts.Remove(tab.Id);
+                }
             }
             else
             {
@@ -787,16 +802,24 @@ public class MainWindow : Window, IDisposable
         var nearby = PlayerActions.FindNearby(partner);
         using (ImRaii.Disabled(nearby == null))
         {
+            // Tooltip checked per item: after the block, IsItemHovered would
+            // only cover the last selectable.
+            void NearbyOnlyTooltip()
+            {
+                if (nearby == null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip("Only available while the player is nearby.");
+            }
+
             if (ImGui.Selectable("Target"))
                 PlayerActions.Target(nearby!);
+            NearbyOnlyTooltip();
             if (ImGui.Selectable("Examine"))
                 PlayerActions.Examine(nearby!);
+            NearbyOnlyTooltip();
             if (ImGui.Selectable("Adventurer Plate"))
                 PlayerActions.OpenAdventurerPlate(nearby!);
+            NearbyOnlyTooltip();
         }
-
-        if (nearby == null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("Only available while the player is nearby.");
 
         if (ImGui.Selectable("Invite to Party") && !PlayerActions.InviteToParty(partner))
             Notify($"Could not invite {name}.");
@@ -2016,7 +2039,13 @@ public class MainWindow : Window, IDisposable
                     : text;
 
         if (!ChatSender.Send(toSend))
+        {
+            // The only false path is the length cap — easy to hit in a tell
+            // tab, where "/tell Name@World " is prepended after the input's
+            // own limit. Without feedback, Enter appears to do nothing.
+            Notify("Message too long to send.");
             return false;
+        }
 
         if (sentHistory.Count == 0 || sentHistory[^1] != text)
         {
@@ -2047,7 +2076,10 @@ public class MainWindow : Window, IDisposable
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
             ImGui.TextUnformatted(message.StampCache);
 
-        var channelColor = ChatColors.For(message.Type);
+        // Masked: flagged variants (source bits in the high byte) must color
+        // and prefix like their base kind — Route already matches them into
+        // the same tabs.
+        var channelColor = ChatColors.For(ChatTypes.Mask(message.Type));
 
         if (!message.HasPrefixCache)
         {
@@ -2395,7 +2427,8 @@ public class MainWindow : Window, IDisposable
         if (message.Sender.Length == 0)
             return string.Empty;
 
-        return message.Type switch
+        // Masked for the same reason as the channel color lookup.
+        return ChatTypes.Mask(message.Type) switch
         {
             XivChatType.TellIncoming => $"{message.Sender} >>",
             XivChatType.TellOutgoing => $">> {message.Sender}:",

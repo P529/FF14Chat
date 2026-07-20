@@ -49,15 +49,25 @@ public static class Emotes
 
             // First request: mark as in-flight, read the PNG from the
             // embedded zip (a few KB, cheap enough for the draw thread).
+            // A failed read leaves the null marker → permanent text fallback,
+            // same as every other failure mode here.
             Textures[emoji] = null;
-            var entry = Archive?.GetEntry(FileName(emoji) + ".png");
-            if (entry == null)
-                return null;
+            try
+            {
+                var entry = Archive?.GetEntry(FileName(emoji) + ".png");
+                if (entry == null)
+                    return null;
 
-            using var stream = entry.Open();
-            using var buffer = new MemoryStream((int)entry.Length);
-            stream.CopyTo(buffer);
-            bytes = buffer.ToArray();
+                using var stream = entry.Open();
+                using var buffer = new MemoryStream((int)entry.Length);
+                stream.CopyTo(buffer);
+                bytes = buffer.ToArray();
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.Warning(e, $"Emote zip read failed for {emoji}");
+                return null;
+            }
         }
 
         _ = System.Threading.Tasks.Task.Run(async () =>

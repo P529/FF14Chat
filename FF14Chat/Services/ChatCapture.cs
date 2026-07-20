@@ -140,8 +140,10 @@ public sealed class ChatCapture : IDisposable
         {
             Timestamp = gameTimestamp,
             Type = chatMessage.LogKind,
-            Sender = chatMessage.Sender.TextValue,
-            Text = chatMessage.Message.TextValue,
+            // The locals from the dedup check above — TextValue re-walks the
+            // SeString payloads on every call.
+            Sender = senderText,
+            Text = messageText,
             Segments = MessageParser.Parse(chatMessage.Message),
             SenderRaw = chatMessage.Sender.Encode(),
             MessageRaw = chatMessage.Message.Encode(),

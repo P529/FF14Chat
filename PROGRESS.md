@@ -157,6 +157,24 @@ state of what actually works.
     unused `CommandEntry.FromPlugin`; stale `TabOrder`/`ClosedTellTabs`
     ids now pruned at load (an accepted-debt item since the audit).
 
+- **Clean-code round (two Fable reviewers, services + UI)** — applied:
+  chat-send failures now log instead of vanishing (the send runs detached
+  on the framework thread); emote zip reads guarded like every sibling
+  failure mode; captured messages no longer walk their SeStrings twice;
+  URLs shed glued sentence punctuation ("see https://a.com." no longer
+  404s, balanced-bracket aware); flagged chat-type variants (source bits
+  in the high byte) now color/prefix like their base kind, matching how
+  routing already treats them; history search debounced 300 ms (was a
+  full-table LIKE scan per keystroke); "message too long" now notifies
+  instead of Enter silently doing nothing; closed tell tabs drop their
+  drafts (no ghost drafts on reopen); the last bare hook detour got the
+  try/catch the other two had; nearby-only context items each explain
+  their disabled state; two stale doc comments corrected (TabManager
+  threading contract, MessageDatabase read paths). MainWindow god-class
+  verdict: acceptable as a window controller; if it keeps growing, the
+  tell-integration hooks (~250 lines) and tab-strip scroll/order sync
+  (~180 lines) are the two clean seams to extract first.
+
 ## Known gaps / accepted quirks
 - Friend-list refresh runs every 60 s → presence dot can lag up to a minute
   after opening a tab or a friend logging off.
@@ -174,8 +192,10 @@ state of what actually works.
   vanilla's forward/back rotation. LS/CWLS *rotation* binds skipped.
 - Native tooltip slides behind the chat when the window leaves no side room
   (layering limit: game UI renders under ImGui, unavoidable).
-- Older audit notes in PLAN.md still apply (CWLS shared colors, stale
-  config ids).
+- Older audit notes in PLAN.md still apply (CWLS shared colors).
+- A single unbroken over-long word (e.g. a huge URL) never word-wraps —
+  the tokenizer splits on spaces only; the row overflows instead. Both
+  review passes flagged it; fix needs mid-word measuring, deferred.
 
 ## Next up
 - v3 feature round complete (see PLAN.md). Candidates for next: reply

@@ -32,18 +32,28 @@ public static class ChatSender
 
     private static unsafe void SendInternal(string text)
     {
-        var uiModule = UIModule.Instance();
-        if (uiModule == null)
-            return;
-
-        var utf8 = Utf8String.FromString(text);
+        // Never let a native failure escape unobserved: RunOnFrameworkThread
+        // discards the task, so an unlogged throw here (classic patch-day
+        // breakage) would look like messages silently not sending.
         try
         {
-            uiModule->ProcessChatBoxEntry(utf8, 0, false);
+            var uiModule = UIModule.Instance();
+            if (uiModule == null)
+                return;
+
+            var utf8 = Utf8String.FromString(text);
+            try
+            {
+                uiModule->ProcessChatBoxEntry(utf8, 0, false);
+            }
+            finally
+            {
+                utf8->Dtor(true);
+            }
         }
-        finally
+        catch (System.Exception e)
         {
-            utf8->Dtor(true);
+            Plugin.Log.Error(e, "Chat send failed");
         }
     }
 

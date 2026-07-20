@@ -157,11 +157,22 @@ public static partial class MessageParser
                 if (match.Index > consumed)
                     result.Add(segment with { Text = segment.Text[consumed..match.Index] });
 
-                var target = match.Value.StartsWith("www.", System.StringComparison.OrdinalIgnoreCase)
-                    ? "https://" + match.Value
-                    : match.Value;
-                result.Add(segment with { Text = match.Value, Link = new SegmentLink.Url(target) });
-                consumed = match.Index + match.Length;
+                // Sentence punctuation glued to the URL ("see https://a.com.")
+                // is prose, not link; a closing bracket only counts when the
+                // URL itself opened one (wiki links like /wiki/Foo_(bar)).
+                var url = match.Value;
+                while (url.Length > 0 && (")]".Contains(url[^1])
+                           ? url.IndexOf(url[^1] == ')' ? '(' : '[') < 0
+                           : ".,;:!?".Contains(url[^1])))
+                {
+                    url = url[..^1];
+                }
+
+                var target = url.StartsWith("www.", System.StringComparison.OrdinalIgnoreCase)
+                    ? "https://" + url
+                    : url;
+                result.Add(segment with { Text = url, Link = new SegmentLink.Url(target) });
+                consumed = match.Index + url.Length;
             }
 
             if (consumed < segment.Text.Length)

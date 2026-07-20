@@ -63,7 +63,13 @@ public sealed class TabState
     }
 }
 
-/// <summary>Routes captured messages into fixed and per-tell-partner tabs.</summary>
+/// <summary>
+/// Routes captured messages into fixed and per-tell-partner tabs.
+/// Threading: today every caller (chat events, framework update, ImGui draw)
+/// runs on the game's main thread, so the gate is defensive rather than
+/// load-bearing — it future-proofs routing ever moving off-thread. That is
+/// also why TabState.Unread/Revision may be read outside the lock.
+/// </summary>
 public sealed class TabManager
 {
     private readonly object gate = new();
