@@ -44,6 +44,27 @@ public class SettingsWindow : Window, IDisposable
         ]),
     ];
 
+    /// <summary>
+    /// Assembly version + on-disk build time, so a loaded build can be
+    /// verified at a glance (shown in the settings title and header).
+    /// </summary>
+    internal static readonly string BuildStamp = MakeBuildStamp();
+
+    private static string MakeBuildStamp()
+    {
+        try
+        {
+            var asm = typeof(SettingsWindow).Assembly;
+            var ver = asm.GetName().Version;
+            var built = System.IO.File.GetLastWriteTime(asm.Location);
+            return $"v{ver} · built {built:yyyy-MM-dd HH:mm:ss}";
+        }
+        catch
+        {
+            return "build unknown";
+        }
+    }
+
     private readonly Plugin plugin;
     private readonly MainWindow mainWindow;
 
@@ -53,7 +74,8 @@ public class SettingsWindow : Window, IDisposable
     private ImRaii.ColorDisposable? themeColors;
     private ImRaii.StyleDisposable? themeStyles;
 
-    public SettingsWindow(Plugin plugin, MainWindow mainWindow) : base("FF14Chat Settings###FF14ChatSettings")
+    public SettingsWindow(Plugin plugin, MainWindow mainWindow)
+        : base($"FF14Chat Settings — {BuildStamp}###FF14ChatSettings")
     {
         this.plugin = plugin;
         this.mainWindow = mainWindow;
@@ -87,6 +109,8 @@ public class SettingsWindow : Window, IDisposable
     public override void Draw()
     {
         var config = plugin.Configuration;
+
+        ImGui.TextDisabled(BuildStamp);
 
         using var tabBar = ImRaii.TabBar("##settings");
         if (!tabBar.Success)
@@ -193,6 +217,9 @@ public class SettingsWindow : Window, IDisposable
         Toggle(config, "Emotes (:sob: shows the emoji)",
             config.RenderEmotes, static (c, v) => c.RenderEmotes = v,
             "Discord-style shortcodes render as emoji images; type : plus two letters for suggestions.\nArtwork: Twemoji (CC-BY 4.0), bundled with the plugin — nothing is downloaded.");
+        Toggle(config, "Tab cycles completions, Space accepts",
+            config.TabCyclesSuggestions, static (c, v) => c.TabCyclesSuggestions = v,
+            "While command/emote completions are open:\nTab moves to the next option (Shift+Tab previous), Space locks it in.\nOff: Tab accepts the highlighted option immediately.");
         Toggle(config, "Native item tooltips",
             config.NativeItemTooltips, static (c, v) => c.NativeItemTooltips = v,
             "The game's own tooltip on item links instead of the plugin's card.");

@@ -90,6 +90,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Render Discord-style ":shortcode:" emotes as Twemoji images.</summary>
     public bool RenderEmotes { get; set; } = true;
 
+    /// <summary>
+    /// While completions are open, Tab cycles the highlight and Space accepts,
+    /// instead of Tab accepting the highlighted completion immediately.
+    /// </summary>
+    public bool TabCyclesSuggestions { get; set; }
+
     /// <summary>Game's own ItemDetail tooltip on item links instead of the custom card.</summary>
     public bool NativeItemTooltips { get; set; } = true;
 

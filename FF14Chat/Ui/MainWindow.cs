@@ -45,6 +45,7 @@ public class MainWindow : Window, IDisposable
     private List<CommandEntry> suggestions = [];
     private int suggestionIndex;
     private string suggestionQuery = string.Empty;
+    private bool acceptSuggestionRequested;
 
     private string? selectTabId;
 
@@ -1636,7 +1637,8 @@ public class MainWindow : Window, IDisposable
             submitted = ImGui.InputTextWithHint(
                 $"##input{tab.Id}", hint, ref draft, ChatSender.MaxBytes,
                 ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory
-                | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion,
+                | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion
+                | ImGuiInputTextFlags.CallbackCharFilter,
                 InputCallback);
         }
         var inputActive = ImGui.IsItemActive();
@@ -1885,6 +1887,20 @@ public class MainWindow : Window, IDisposable
             .ToList();
     }
 
+    /// <summary>
+    /// Replaces the draft with the highlighted completion (plus a trailing
+    /// space) and refocuses the input. Clears the popup and seeds the query so
+    /// it doesn't immediately reopen on the completed text.
+    /// </summary>
+    private void AcceptSuggestion(TabState tab)
+    {
+        var completed = suggestions[Math.Clamp(suggestionIndex, 0, suggestions.Count - 1)].Command + " ";
+        drafts[tab.Id] = completed;
+        focusInput = true;
+        suggestions = [];
+        suggestionQuery = completed;
+    }
+
     private void DrawSuggestions(TabState tab, Vector2 inputPos)
     {
         var lineHeight = ImGui.GetTextLineHeightWithSpacing();
@@ -1923,8 +1939,8 @@ public class MainWindow : Window, IDisposable
 
             if (ImGui.Selectable($"{entry.Display ?? entry.Command}##sugg{i}", selected))
             {
-                drafts[tab.Id] = entry.Command + " ";
-                focusInput = true;
+                suggestionIndex = i;
+                AcceptSuggestion(tab);
             }
 
             if (entry.Description.Length > 0)
@@ -1952,6 +1968,38 @@ public class MainWindow : Window, IDisposable
                 data.SelectionEnd = data.BufTextLen;
             }
 
+            // Space accepted a completion (flagged in the char filter earlier
+            // this same frame). Edit the widget's own buffer here — an external
+            // draft write is ignored while the field is active, so it must go
+            // through the callback like the Tab path does.
+            if (acceptSuggestionRequested)
+            {
+                acceptSuggestionRequested = false;
+                if (suggestions.Count > 0)
+                {
+                    var completed =
+                        suggestions[Math.Clamp(suggestionIndex, 0, suggestions.Count - 1)].Command + " ";
+                    data.DeleteChars(0, data.BufTextLen);
+                    data.InsertChars(0, completed);
+                }
+            }
+
+            return 0;
+        }
+
+        // In Tab-cycles mode, Space accepts the highlighted completion. The
+        // char is discarded here (return 1) and flagged; CallbackAlways fires
+        // later this same frame and applies the edit to the widget's buffer.
+        if (data.EventFlag == ImGuiInputTextFlags.CallbackCharFilter)
+        {
+            if (data.EventChar == ' '
+                && suggestions.Count > 0
+                && plugin.Configuration.TabCyclesSuggestions)
+            {
+                acceptSuggestionRequested = true;
+                return 1;
+            }
+
             return 0;
         }
 
@@ -1962,6 +2010,16 @@ public class MainWindow : Window, IDisposable
         {
             if (suggestions.Count > 0)
             {
+                // Tab-cycles mode: move the highlight (Shift = backward) and
+                // wait for Space to lock it in, rather than accepting now.
+                if (plugin.Configuration.TabCyclesSuggestions)
+                {
+                    var direction = ImGui.GetIO().KeyShift ? -1 : 1;
+                    suggestionIndex =
+                        (suggestionIndex + direction + suggestions.Count) % suggestions.Count;
+                    return 0;
+                }
+
                 var completed = suggestions[Math.Clamp(suggestionIndex, 0, suggestions.Count - 1)].Command + " ";
                 data.DeleteChars(0, data.BufTextLen);
                 data.InsertChars(0, completed);
