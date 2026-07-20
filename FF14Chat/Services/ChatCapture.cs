@@ -162,15 +162,16 @@ public sealed class ChatCapture : IDisposable
             }
 
             // Own messages carry no player payload; the local player is the
-            // sender when the plain-text name matches.
-            if (Plugin.ObjectTable.LocalPlayer is { } local)
+            // sender when the plain-text name matches. PlayerState stays
+            // loaded through windows where the object-table entry is null.
+            if (Plugin.PlayerState.IsLoaded
+                && Plugin.PlayerState.CharacterName is { Length: > 0 } localName)
             {
-                var localName = local.Name.TextValue;
                 if (senderPlayer == null
                     ? senderText.EndsWith(localName, StringComparison.Ordinal)
                     : senderPlayer.StartsWith(localName + "@", StringComparison.Ordinal))
                 {
-                    return local.ClassJob.RowId;
+                    return Plugin.PlayerState.ClassJob.RowId;
                 }
             }
 
