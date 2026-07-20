@@ -124,4 +124,4 @@ Both source projects are pinned as submodules under `third_party/` at the exact 
 
 - All Dalamud plugins are technically against the FFXIV Terms of Service. This one is quiet and personal-use; use at your own risk and keep plugin talk out of the game.
 - Built from scratch. [ChatTwo](https://github.com/Blooym/ChatTwo) (EUPL-1.2) was studied as a reference for hook signatures and pitfalls; no code was copied.
-- FINAL FANTASY XIV © SQUARE ENIX CO., LTD. This project is not affiliated with Square Enix.
+- This project is not affiliated with, endorsed by, or sponsored by Square Enix.
