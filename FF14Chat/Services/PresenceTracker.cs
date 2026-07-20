@@ -27,6 +27,14 @@ public sealed class PresenceTracker : IDisposable
     private static readonly TimeSpan FriendRequestInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan ActivityWindow = TimeSpan.FromMinutes(5);
 
+    // Right after login the friend list needs a network round trip: the
+    // first poll sends the request, the response lands asynchronously a
+    // moment later. Poll fast until the first friend data arrives (or the
+    // budget runs out — e.g. an empty friend list never "arrives"), so
+    // restored tell tabs get their dots immediately instead of at t+10s.
+    private static readonly TimeSpan FastPollInterval = TimeSpan.FromSeconds(1);
+    private const int FastPollBudget = 30;
+
     // OnlineStatus sheet row 17 = "Away from Keyboard".
     private const uint OnlineStatusAfk = 17;
 
@@ -44,6 +52,7 @@ public sealed class PresenceTracker : IDisposable
 
     private DateTime nextPoll = DateTime.MinValue;
     private DateTime nextFriendRequest = DateTime.MinValue;
+    private int fastPollsLeft = FastPollBudget;
 
     public PresenceTracker(TabManager tabs)
     {
@@ -91,10 +100,26 @@ public sealed class PresenceTracker : IDisposable
 
     private void OnUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
-        var now = DateTime.Now;
-        if (now < nextPoll || !Plugin.ClientState.IsLoggedIn)
+        if (!Plugin.ClientState.IsLoggedIn)
+        {
+            // Re-arm the fast window for the next login (character switch).
+            fastPollsLeft = FastPollBudget;
             return;
-        nextPoll = now + PollInterval;
+        }
+
+        var now = DateTime.Now;
+        if (now < nextPoll)
+            return;
+
+        if (fastPollsLeft > 0)
+        {
+            fastPollsLeft--;
+            nextPoll = now + FastPollInterval;
+        }
+        else
+        {
+            nextPoll = now + PollInterval;
+        }
 
         // Only partners with an open tell tab are tracked; nobody else's
         // status is stored, and no friend-list request goes out without one.
@@ -105,7 +130,10 @@ public sealed class PresenceTracker : IDisposable
         if (partners.Count == 0)
             return;
 
-        CollectFriends(partners);
+        // Friend data present means the round trip completed — the fast
+        // window has done its job.
+        if (CollectFriends(partners))
+            fastPollsLeft = 0;
         CollectParty(partners);
         CollectNearby(partners);
     }
@@ -114,17 +142,18 @@ public sealed class PresenceTracker : IDisposable
     /// Runs the action for every friend in the proxy's current snapshot as
     /// ("Name@World", raw status), requesting a refresh at most once per
     /// interval first. The refresh lands asynchronously, so a call may see a
-    /// stale or empty list — callers must tolerate that.
+    /// stale or empty list — callers must tolerate that. Returns whether the
+    /// snapshot held any friends at all.
     /// </summary>
-    private unsafe void ForEachFriend(Action<string, InfoProxyCommonList.CharacterData.OnlineStatus> action)
+    private unsafe bool ForEachFriend(Action<string, InfoProxyCommonList.CharacterData.OnlineStatus> action)
     {
         var infoModule = InfoModule.Instance();
         if (infoModule == null)
-            return;
+            return false;
 
         var proxy = infoModule->GetInfoProxyById(InfoProxyId.FriendList);
         if (proxy == null)
-            return;
+            return false;
 
         // The proxy only fills on request (the same packet the social window
         // sends); refresh periodically and read whatever it currently holds.
@@ -135,13 +164,19 @@ public sealed class PresenceTracker : IDisposable
             proxy->RequestData();
         }
 
+        var any = false;
         var friendList = (InfoProxyCommonList*)proxy;
         foreach (ref readonly var friend in friendList->CharDataSpan)
         {
             var name = friend.NameString;
             if (name.Length > 0)
+            {
+                any = true;
                 action(GameData.WithWorld(name, friend.HomeWorld), friend.State);
+            }
         }
+
+        return any;
     }
 
     /// <summary>All friends as "Name@World" from the current proxy snapshot.</summary>
@@ -152,9 +187,10 @@ public sealed class PresenceTracker : IDisposable
         return result;
     }
 
-    private void CollectFriends(HashSet<string> partners)
+    /// <summary>Returns whether the proxy snapshot held any friend data.</summary>
+    private bool CollectFriends(HashSet<string> partners)
     {
-        ForEachFriend((key, state) =>
+        return ForEachFriend((key, state) =>
         {
             if (!partners.Contains(key))
                 return;
