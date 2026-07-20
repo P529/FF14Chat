@@ -130,8 +130,8 @@ Known gaps, accepted for now:
 - The 300 ms dedup window can swallow a genuinely repeated identical message (e.g. macro double-send).
 - Enter/`/` interception assumes default keybinds; a rebound chat key isn't honored.
 - The Enter blocked-conditions list is curated, not exhaustive — new occupied states may need adding as found.
-- `ChatSender` applies its own sanitation, not the game's `SanitizeString`; unusual unicode may render differently than vanilla would send it.
-- `TabOrder` and `ClosedTellTabs` accumulate stale tell ids indefinitely (harmless, could prune on load).
+- ~~`ChatSender` applies its own sanitation, not the game's `SanitizeString`~~ resolved 2026-07-20: Dalamud's `Sanitizer` (the game's pass) runs first, control-char strip second.
+- ~~`TabOrder` and `ClosedTellTabs` accumulate stale tell ids indefinitely~~ resolved 2026-07-20: pruned at load against surviving history and the current tab set.
 - CWLS channels 2-8 share CWLS1's indicator color (their `XivChatType` values are non-contiguous; same color anyway).
 - Native item tooltip remains unimplemented; `AgentItemDetail` manipulation is possible but patch-fragile — the custom card stays until it hurts.
 

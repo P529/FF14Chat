@@ -26,4 +26,11 @@ public sealed record MessageSegment(
     string Text,
     Vector4? Color,
     SegmentLink? Link,
-    string? Emote = null);
+    string? Emote = null)
+{
+    /// <summary>
+    /// Render cache of word tokens ("\n" entries force a line break), built
+    /// lazily on the draw thread — Text is immutable, so once is enough.
+    /// </summary>
+    internal string[]? Tokens;
+}

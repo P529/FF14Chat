@@ -5,7 +5,6 @@ using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Utility;
 using FF14Chat.Model;
-using Lumina.Excel.Sheets;
 
 namespace FF14Chat.Services;
 
@@ -190,19 +189,8 @@ public static partial class MessageParser
         return world is { Length: > 0 } ? $"{player.PlayerName}@{world}" : player.PlayerName;
     }
 
-    private static string? ResolveItemName(ItemPayload ip)
-    {
-        if (ip.Kind == ItemKind.EventItem)
-        {
-            return Plugin.DataManager.GetExcelSheet<EventItem>().TryGetRow(ip.ItemId, out var eventItem)
-                ? eventItem.Name.ExtractText()
-                : ip.DisplayName;
-        }
-
-        return Plugin.DataManager.GetExcelSheet<Item>().TryGetRow(ip.ItemId, out var item)
-            ? item.Name.ExtractText()
-            : ip.DisplayName;
-    }
+    private static string? ResolveItemName(ItemPayload ip) =>
+        GameData.ItemName(ip.ItemId, ip.Kind == ItemKind.EventItem) ?? ip.DisplayName;
 
     private static Vector4 RgbaToVector(uint rgba) => new(
         ((rgba >> 24) & 0xFF) / 255f,

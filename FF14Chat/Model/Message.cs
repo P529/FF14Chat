@@ -25,4 +25,12 @@ public sealed class Message
     // Original SeString bytes, kept for link/color rendering (M6) and persistence (M5).
     public required byte[] SenderRaw { get; init; }
     public required byte[] MessageRaw { get; init; }
+
+    // Render caches, draw-thread only, built lazily on first draw. All their
+    // inputs are immutable except the clock format, which tags its cache.
+    internal string? StampCache;
+    internal bool StampCache24h;
+    internal bool HasPrefixCache;
+    internal MessageSegment? PrefixCache;
+    internal MessageSegment? FallbackCache;
 }

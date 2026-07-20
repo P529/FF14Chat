@@ -23,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInterop { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
+    [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IPartyList PartyList { get; private set; } = null!;
     [PluginService] internal static Dalamud.Plugin.Services.ITargetManager TargetManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
@@ -142,6 +143,7 @@ public sealed class Plugin : IDalamudPlugin
         Database = new MessageDatabase(
             System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "chat.db"),
             Configuration.RetentionDays);
+        PruneStaleConfigIds();
         HydrateFromDatabase();
 
         Presence = new PresenceTracker(TabManager);
@@ -177,6 +179,42 @@ public sealed class Plugin : IDalamudPlugin
         Emotes.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
+    }
+
+    /// <summary>
+    /// Drops config ids that can no longer matter: closed-tell flags for
+    /// partners with no surviving history (hydration only spawns tabs from
+    /// rows, so the flag protects nothing), and order slots for deleted
+    /// fixed tabs or tells that are neither closed nor on disk. Runs after
+    /// the database's retention prune so "surviving" is accurate.
+    /// </summary>
+    private void PruneStaleConfigIds()
+    {
+        try
+        {
+            var onDisk = Database.TellPartnersOnDisk();
+            var removed = Configuration.ClosedTellTabs.RemoveAll(p => !onDisk.Contains(p));
+
+            var fixedIds = new System.Collections.Generic.HashSet<string>(
+                Configuration.Tabs.ConvertAll(t => "tab:" + t.Name))
+            {
+                // The combined General+System tab reuses this id even when no
+                // tab literally named General exists.
+                "tab:General",
+            };
+            removed += Configuration.TabOrder.RemoveAll(id => id.StartsWith("tab:", System.StringComparison.Ordinal)
+                ? !fixedIds.Contains(id)
+                : id.StartsWith("tell:", System.StringComparison.Ordinal)
+                  && !onDisk.Contains(id["tell:".Length..])
+                  && !Configuration.ClosedTellTabs.Contains(id["tell:".Length..]));
+
+            if (removed > 0)
+                Configuration.Save();
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning(e, "Stale config id prune failed");
+        }
     }
 
     private void HydrateFromDatabase()

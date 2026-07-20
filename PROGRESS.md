@@ -133,6 +133,29 @@ state of what actually works.
   working in duties), with the tag as fallback; a positive result
   latches until logout so transient unreadable states can't hide the
   tab.
+- **Cleanup round (multi-agent audit)** — three audits (native-API
+  usage, dead/duplicated code, render-path perf), findings verified
+  against the shipped Dalamud/ClientStructs docs, then applied:
+  - *Better APIs*: outgoing chat now runs Dalamud's `Sanitizer` (the
+    game's own sanitation pass) before the plugin's control-char strip;
+    the local player name comes from `IPlayerState.CharacterName`
+    (cached managed string) instead of a per-frame SeString parse.
+    Confirmed-good: no Dalamud API exists for keybind reading
+    (`UIInputData` stays), shared game-icon textures are interned by
+    Dalamud (per-frame `GetFromGameIcon` is the intended pattern).
+  - *Perf, behavior-identical*: word tokens cached per segment,
+    timestamps/prefixes/sender-links cached per message, per-tab
+    message snapshots cached by revision, tab labels cached, tab-order
+    sync early-outs without allocating, FC proxy read stops once
+    latched, input placeholder scan runs once per frame. Eliminates
+    the ~6-10k allocations/frame the log cost at its 500-message cap.
+  - *Dedup/dead code*: shared `GameData` (world/item lookups that
+    existed in three/two copies), `ChatTypes.Mask` (the `& 0x7F` in
+    four places), one friend-proxy reader (was two), one fixed-tab
+    routing path (was two), settings checkbox helper (13 blocks),
+    line-wrap helper; removed unread `MessageStore.Revision` and
+    unused `CommandEntry.FromPlugin`; stale `TabOrder`/`ClosedTellTabs`
+    ids now pruned at load (an accepted-debt item since the audit).
 
 ## Known gaps / accepted quirks
 - Friend-list refresh runs every 60 s → presence dot can lag up to a minute

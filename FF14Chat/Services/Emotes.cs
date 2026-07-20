@@ -156,6 +156,9 @@ public static class Emotes
         }
     }
 
+    private const char ZwjChar = (char)0x200D;
+    private const string Vs16String = "\uFE0F";
+
     /// <summary>
     /// Twemoji asset naming: hex codepoints joined by '-'; U+FE0F variant
     /// selectors are dropped unless the sequence contains a ZWJ.
@@ -165,9 +168,6 @@ public static class Emotes
         var s = emoji.Contains(ZwjChar) ? emoji : emoji.Replace(Vs16String, string.Empty);
         return string.Join('-', s.EnumerateRunes().Select(r => r.Value.ToString("x")));
     }
-
-    private const char ZwjChar = (char)0x200D;
-    private const string Vs16String = "\uFE0F";
 
     private static Dictionary<string, string> LoadMap()
     {

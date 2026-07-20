@@ -1,4 +1,5 @@
 using System.Text;
+using Dalamud.Game.Text.Sanitizer;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
 
@@ -12,6 +13,8 @@ public static class ChatSender
 {
     // The game's chat input caps at 500 UTF-8 bytes.
     public const int MaxBytes = 500;
+
+    private static Sanitizer? sanitizer;
 
     /// <summary>Returns false if the text was rejected (too long); empty text is a no-op success.</summary>
     public static bool Send(string text)
@@ -46,8 +49,15 @@ public static class ChatSender
 
     private static string Sanitize(string text)
     {
-        var builder = new StringBuilder(text.Length);
-        foreach (var ch in text)
+        // Dalamud's Sanitizer applies the game's own string sanitation
+        // (the pass the native input runs before sending); control
+        // characters are stripped on top — a newline would smuggle a
+        // second command past the single-line assumption.
+        sanitizer ??= new Sanitizer(Plugin.ClientState.ClientLanguage);
+        var gameClean = sanitizer.Sanitize(text);
+
+        var builder = new StringBuilder(gameClean.Length);
+        foreach (var ch in gameClean)
         {
             if (!char.IsControl(ch))
                 builder.Append(ch);

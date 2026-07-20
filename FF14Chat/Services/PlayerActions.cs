@@ -65,7 +65,7 @@ public static class PlayerActions
         if (proxy == null)
             return false;
 
-        var worldId = WorldIdByName(world);
+        var worldId = GameData.WorldIdByName(world);
         var nameUtf8 = Utf8String.FromString(name);
         try
         {
@@ -75,19 +75,5 @@ public static class PlayerActions
         {
             nameUtf8->Dtor(true);
         }
-    }
-
-    private static ushort WorldIdByName(string world)
-    {
-        if (world.Length == 0)
-            return 0;
-
-        foreach (var row in Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>())
-        {
-            if (row.Name.ExtractText() == world)
-                return (ushort)row.RowId;
-        }
-
-        return 0;
     }
 }

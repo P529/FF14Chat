@@ -36,6 +36,22 @@ public sealed class TabState
     // Renderer state, only touched on the draw thread.
     public long RenderedRevision { get; set; } = -1;
 
+    // Snapshot cache for MessagesSnapshot; guarded by the TabManager gate.
+    internal Message[]? SnapshotCache;
+    internal long SnapshotRevision = -1;
+
+    private string? labelPlain;
+    private string? labelWithDot;
+
+    /// <summary>
+    /// Stable ImGui tab label ("Title  ###Id"): trailing spaces reserve room
+    /// for the unread badge overlay, leading spaces for the presence dot.
+    /// Cached — Title and Id are immutable and this draws every frame.
+    /// </summary>
+    public string Label(bool presenceDot) => presenceDot
+        ? labelWithDot ??= $"  {Title}  ###{Id}"
+        : labelPlain ??= $"{Title}  ###{Id}";
+
     internal void Add(Message message)
     {
         Messages.Add(message);
@@ -52,6 +68,7 @@ public sealed class TabManager
 {
     private readonly object gate = new();
     private readonly List<TabState> tabs = [];
+    private readonly List<TabState> fixedScratch = [];
     private readonly Configuration configuration;
     private readonly MessageStore store;
 
@@ -122,28 +139,7 @@ public sealed class TabManager
             var fixedTabs = BuildFixedTabs();
 
             foreach (var message in store.Snapshot())
-            {
-                var masked = (XivChatType)((ushort)message.Type & 0x7F);
-                var anyMatch = false;
-                foreach (var tab in fixedTabs)
-                {
-                    if (tab.Channels!.Contains(message.Type) || tab.Channels.Contains(masked))
-                    {
-                        tab.Add(message);
-                        anyMatch = true;
-                    }
-                }
-
-                // Same tell exclusion as Route: tells live in tell tabs.
-                if (!anyMatch && message.TellPartner == null && !ChatTypes.IsBattleSpam(message.Type))
-                {
-                    foreach (var tab in fixedTabs)
-                    {
-                        if (tab.CatchAll)
-                            tab.Add(message);
-                    }
-                }
-            }
+                AddToFixedTabs(fixedTabs, message);
 
             foreach (var tab in fixedTabs)
                 tab.Unread = 0;
@@ -187,6 +183,27 @@ public sealed class TabManager
         var changed = false;
         lock (gate)
         {
+            // This syncs every frame and the order almost never changes;
+            // detect "already in this relative order" without allocating.
+            var lastIndex = -1;
+            var inOrder = true;
+            foreach (var tab in tabs)
+            {
+                var index = orderedIds.IndexOf(tab.Id);
+                if (index < 0)
+                    continue;
+                if (index < lastIndex)
+                {
+                    inOrder = false;
+                    break;
+                }
+
+                lastIndex = index;
+            }
+
+            if (inOrder)
+                return;
+
             // Tabs absent from the display order (hidden, e.g. the FC tab
             // without a free company) keep their current slot; only the
             // listed ones reorder among themselves. Sorting absentees to the
@@ -220,40 +237,24 @@ public sealed class TabManager
     /// </summary>
     public void Route(Message message, bool live = true)
     {
-        // Battle log entries pack source/target flags into the high bits;
-        // the low 7 bits are the base kind, which is what filters care about.
-        var masked = (XivChatType)((ushort)message.Type & 0x7F);
-
         var reopenedClosedTab = false;
         lock (gate)
         {
-            var anyFixedMatch = false;
+            fixedScratch.Clear();
             foreach (var tab in tabs)
             {
-                var matches = tab.IsTell
-                    ? message.TellPartner == tab.TellPartner
-                    : tab.Channels!.Contains(message.Type) || tab.Channels.Contains(masked);
-                if (matches)
+                if (tab.IsTell)
                 {
-                    tab.Add(message);
-                    if (!tab.IsTell)
-                        anyFixedMatch = true;
+                    if (message.TellPartner == tab.TellPartner)
+                        tab.Add(message);
+                }
+                else
+                {
+                    fixedScratch.Add(tab);
                 }
             }
 
-            // Unclassified non-combat messages (join notices, obtain lines,
-            // unnamed system kinds) land in the catch-all tab. Combat kinds
-            // stay out (also guards old persisted rows during hydration).
-            // Tells always live in their tell tab, so a fixed tab that has
-            // tell channels unticked must not get them back via catch-all.
-            if (!anyFixedMatch && message.TellPartner == null && !ChatTypes.IsBattleSpam(message.Type))
-            {
-                foreach (var tab in tabs)
-                {
-                    if (tab.CatchAll)
-                        tab.Add(message);
-                }
-            }
+            AddToFixedTabs(fixedScratch, message);
 
             if (message.TellPartner is { } partner && !tabs.Any(t => t.TellPartner == partner))
             {
@@ -292,11 +293,52 @@ public sealed class TabManager
         }
     }
 
+    /// <summary>
+    /// The tab's messages for rendering; the copy is cached and only rebuilt
+    /// when the tab's revision moved (this is called every frame).
+    /// </summary>
     public Message[] MessagesSnapshot(TabState tab)
     {
         lock (gate)
         {
-            return [.. tab.Messages];
+            if (tab.SnapshotCache == null || tab.SnapshotRevision != tab.Revision)
+            {
+                tab.SnapshotCache = [.. tab.Messages];
+                tab.SnapshotRevision = tab.Revision;
+            }
+
+            return tab.SnapshotCache;
+        }
+    }
+
+    /// <summary>
+    /// Adds a message to every matching fixed tab. Unclassified non-combat
+    /// messages (join notices, obtain lines, unnamed system kinds) land in
+    /// the catch-all tab; combat kinds stay out (also guards old persisted
+    /// rows during hydration). Tells always live in their tell tab, so a
+    /// fixed tab that has tell channels unticked must not get them back via
+    /// catch-all. Caller holds the gate.
+    /// </summary>
+    private static void AddToFixedTabs(List<TabState> fixedTabs, Message message)
+    {
+        var masked = ChatTypes.Mask(message.Type);
+        var anyMatch = false;
+        foreach (var tab in fixedTabs)
+        {
+            if (tab.Channels!.Contains(message.Type) || tab.Channels.Contains(masked))
+            {
+                tab.Add(message);
+                anyMatch = true;
+            }
+        }
+
+        if (anyMatch || message.TellPartner != null || ChatTypes.IsBattleSpam(message.Type))
+            return;
+
+        foreach (var tab in fixedTabs)
+        {
+            if (tab.CatchAll)
+                tab.Add(message);
         }
     }
 

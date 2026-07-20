@@ -59,6 +59,8 @@ public sealed class ChatCapture : IDisposable
         var replayDrop = now - gameTimestamp > TimeSpan.FromMinutes(2);
         var battleDrop = ChatTypes.IsBattleSpam(chatMessage.LogKind);
 
+        static string Snippet(string text) => text.Length > 40 ? text[..40] : text;
+
         // For the first minute after load, log every event BEFORE any drop,
         // so silently filtered channels can be identified from /xllog.
         if (now - loadedAt < TimeSpan.FromSeconds(60))
@@ -66,10 +68,10 @@ public sealed class ChatCapture : IDisposable
             Plugin.Log.Information(
                 "capture: type={Type} masked={Masked} drop={Drop} sender='{Sender}' text='{Text}'",
                 (ushort)chatMessage.LogKind,
-                (ushort)chatMessage.LogKind & 0x7F,
+                (ushort)ChatTypes.Mask(chatMessage.LogKind),
                 replayDrop ? "replay" : battleDrop ? "battle" : "none",
                 chatMessage.Sender.TextValue,
-                chatMessage.Message.TextValue is { Length: > 40 } t ? t[..40] : chatMessage.Message.TextValue);
+                Snippet(chatMessage.Message.TextValue));
         }
 
         if (replayDrop || battleDrop)
@@ -82,9 +84,9 @@ public sealed class ChatCapture : IDisposable
             Plugin.Log.Information(
                 "unmapped chat type={Type} (masked={Masked}) sender='{Sender}' text='{Text}'",
                 (ushort)chatMessage.LogKind,
-                (ushort)chatMessage.LogKind & 0x7F,
+                (ushort)ChatTypes.Mask(chatMessage.LogKind),
                 chatMessage.Sender.TextValue,
-                chatMessage.Message.TextValue is { Length: > 40 } t2 ? t2[..40] : chatMessage.Message.TextValue);
+                Snippet(chatMessage.Message.TextValue));
         }
 
         var senderText = chatMessage.Sender.TextValue;
@@ -120,7 +122,7 @@ public sealed class ChatCapture : IDisposable
             // echo; stamp it with the attempted partner so it lands in that
             // tell tab (in addition to its normal channel routing). Matched
             // by kind and timing, not text, so it is locale-independent.
-            var masked = (XivChatType)((ushort)chatMessage.LogKind & 0x7F);
+            var masked = ChatTypes.Mask(chatMessage.LogKind);
             if (masked is XivChatType.ErrorMessage or XivChatType.SystemError
                 && now - lastOutgoingTellAt < TimeSpan.FromMilliseconds(500)
                 && tabs.TellPartners().Contains(attempted))

@@ -133,6 +133,19 @@ public sealed class MessageDatabase : IDisposable
             queue.Add(message);
     }
 
+    /// <summary>Distinct tell partners with any surviving history. Startup only.</summary>
+    public HashSet<string> TellPartnersOnDisk()
+    {
+        var result = new HashSet<string>();
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT DISTINCT tell_partner FROM messages WHERE tell_partner IS NOT NULL";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            result.Add(reader.GetString(0));
+        return result;
+    }
+
     /// <summary>
     /// Loads history for startup hydration in chronological order: a recent
     /// window of everything plus a deeper window of tells, so busy system

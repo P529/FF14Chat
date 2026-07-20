@@ -111,6 +111,21 @@ public class SettingsWindow : Window, IDisposable
         }
     }
 
+    /// <summary>Checkbox bound to a config flag; saves on change.</summary>
+    private static void Toggle(
+        Configuration config, string label, bool value,
+        Action<Configuration, bool> apply, string? tooltip = null)
+    {
+        if (ImGui.Checkbox(label, ref value))
+        {
+            apply(config, value);
+            config.Save();
+        }
+
+        if (tooltip != null && ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
+    }
+
     private void DrawGeneralTab(Configuration config)
     {
         SectionHeader("Appearance", first: true);
@@ -145,120 +160,42 @@ public class SettingsWindow : Window, IDisposable
 
         SectionHeader("Window");
 
-        var hideVanilla = config.HideVanillaChat;
-        if (ImGui.Checkbox("Hide vanilla chat while open", ref hideVanilla))
-        {
-            config.HideVanillaChat = hideVanilla;
-            config.Save();
-        }
-
-        var locked = config.LockWindow;
-        if (ImGui.Checkbox("Lock window position and size", ref locked))
-        {
-            config.LockWindow = locked;
-            config.Save();
-        }
-
-        var hideCutscene = config.HideDuringCutscenes;
-        if (ImGui.Checkbox("Hide during cutscenes", ref hideCutscene))
-        {
-            config.HideDuringCutscenes = hideCutscene;
-            config.Save();
-        }
-
-        var hideUiHidden = config.HideWhenUiHidden;
-        if (ImGui.Checkbox("Hide when game UI is hidden", ref hideUiHidden))
-        {
-            config.HideWhenUiHidden = hideUiHidden;
-            config.Save();
-        }
-
-        var hideLoading = config.HideInLoadingScreens;
-        if (ImGui.Checkbox("Hide on loading screens", ref hideLoading))
-        {
-            config.HideInLoadingScreens = hideLoading;
-            config.Save();
-        }
-
-        var hideBattle = config.HideInBattle;
-        if (ImGui.Checkbox("Hide in combat", ref hideBattle))
-        {
-            config.HideInBattle = hideBattle;
-            config.Save();
-        }
+        Toggle(config, "Hide vanilla chat while open",
+            config.HideVanillaChat, static (c, v) => c.HideVanillaChat = v);
+        Toggle(config, "Lock window position and size",
+            config.LockWindow, static (c, v) => c.LockWindow = v);
+        Toggle(config, "Hide during cutscenes",
+            config.HideDuringCutscenes, static (c, v) => c.HideDuringCutscenes = v);
+        Toggle(config, "Hide when game UI is hidden",
+            config.HideWhenUiHidden, static (c, v) => c.HideWhenUiHidden = v);
+        Toggle(config, "Hide on loading screens",
+            config.HideInLoadingScreens, static (c, v) => c.HideInLoadingScreens = v);
+        Toggle(config, "Hide in combat",
+            config.HideInBattle, static (c, v) => c.HideInBattle = v);
 
         SectionHeader("Chat display");
 
-        var mentions = config.HighlightMentions;
-        if (ImGui.Checkbox("Highlight messages mentioning you", ref mentions))
-        {
-            config.HighlightMentions = mentions;
-            config.Save();
-        }
-
-        var roleColors = config.RoleColorPartyNames;
-        if (ImGui.Checkbox("Role-colored names in party chat", ref roleColors))
-        {
-            config.RoleColorPartyNames = roleColors;
-            config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Tank blue, healer green, DPS red.\nOnly for messages received while in the party.");
-
-        var jobIcons = config.JobIconPartyNames;
-        if (ImGui.Checkbox("Job icon before names in party chat", ref jobIcons))
-        {
-            config.JobIconPartyNames = jobIcons;
-            config.Save();
-        }
-
-        var tellPresence = config.ShowTellPresence;
-        if (ImGui.Checkbox("Online status dot on tell tabs", ref tellPresence))
-        {
-            config.ShowTellPresence = tellPresence;
-            config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Green: online, red: AFK, gray: offline, blue: unknown.\nTracked via friend list, party, and nearby players;\nnon-friends who are elsewhere can't be looked up (blue).");
-
-        var clock24 = config.Use24HourClock;
-        if (ImGui.Checkbox("24-hour timestamps", ref clock24))
-        {
-            config.Use24HourClock = clock24;
-            config.Save();
-        }
-
-        var collapseDupes = config.CollapseDuplicates;
-        if (ImGui.Checkbox("Collapse repeated messages", ref collapseDupes))
-        {
-            config.CollapseDuplicates = collapseDupes;
-            config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Consecutive identical lines show once with a ×N counter.");
-
-        var emotes = config.RenderEmotes;
-        if (ImGui.Checkbox("Emotes (:sob: shows the emoji)", ref emotes))
-        {
-            config.RenderEmotes = emotes;
-            config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Discord-style shortcodes render as emoji images; type : plus two letters for suggestions.\nArtwork: Twemoji (CC-BY 4.0), bundled with the plugin — nothing is downloaded.");
-
-        var nativeTooltips = config.NativeItemTooltips;
-        if (ImGui.Checkbox("Native item tooltips", ref nativeTooltips))
-        {
-            config.NativeItemTooltips = nativeTooltips;
-            config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("The game's own tooltip on item links instead of the plugin's card.");
+        Toggle(config, "Highlight messages mentioning you",
+            config.HighlightMentions, static (c, v) => c.HighlightMentions = v);
+        Toggle(config, "Role-colored names in party chat",
+            config.RoleColorPartyNames, static (c, v) => c.RoleColorPartyNames = v,
+            "Tank blue, healer green, DPS red.\nOnly for messages received while in the party.");
+        Toggle(config, "Job icon before names in party chat",
+            config.JobIconPartyNames, static (c, v) => c.JobIconPartyNames = v);
+        Toggle(config, "Online status dot on tell tabs",
+            config.ShowTellPresence, static (c, v) => c.ShowTellPresence = v,
+            "Green: online, red: AFK, gray: offline, blue: unknown.\nTracked via friend list, party, and nearby players;\nnon-friends who are elsewhere can't be looked up (blue).");
+        Toggle(config, "24-hour timestamps",
+            config.Use24HourClock, static (c, v) => c.Use24HourClock = v);
+        Toggle(config, "Collapse repeated messages",
+            config.CollapseDuplicates, static (c, v) => c.CollapseDuplicates = v,
+            "Consecutive identical lines show once with a ×N counter.");
+        Toggle(config, "Emotes (:sob: shows the emoji)",
+            config.RenderEmotes, static (c, v) => c.RenderEmotes = v,
+            "Discord-style shortcodes render as emoji images; type : plus two letters for suggestions.\nArtwork: Twemoji (CC-BY 4.0), bundled with the plugin — nothing is downloaded.");
+        Toggle(config, "Native item tooltips",
+            config.NativeItemTooltips, static (c, v) => c.NativeItemTooltips = v,
+            "The game's own tooltip on item links instead of the plugin's card.");
 
         SectionHeader("Tabs");
 

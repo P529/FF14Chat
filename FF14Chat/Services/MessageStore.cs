@@ -14,9 +14,6 @@ public sealed class MessageStore
     private readonly List<Message> messages = [];
     private readonly object gate = new();
 
-    /// <summary>Incremented on every mutation so readers can cache snapshots.</summary>
-    public long Revision { get; private set; }
-
     public void Add(Message message)
     {
         lock (gate)
@@ -24,7 +21,6 @@ public sealed class MessageStore
             messages.Add(message);
             if (messages.Count > MaxMessages)
                 messages.RemoveRange(0, messages.Count - MaxMessages);
-            Revision++;
         }
     }
 

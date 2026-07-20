@@ -17,6 +17,7 @@ using FF14Chat.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using FFXIVClientStructs.FFXIV.Client.UI.Shell;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
@@ -288,7 +289,7 @@ public class MainWindow : Window, IDisposable
                 return;
 
             if (world.Length == 0)
-                world = ResolveWorldName(worldId);
+                world = GameData.WorldName(worldId);
 
             var partner = world.Length > 0 ? $"{name}@{world}" : name;
             var tellTab = tabs.OpenTellTab(partner);
@@ -299,13 +300,6 @@ public class MainWindow : Window, IDisposable
         {
             Plugin.Log.Error(e, "Tell tab sync failed");
         }
-    }
-
-    private static string ResolveWorldName(ushort worldId)
-    {
-        return Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>().TryGetRow(worldId, out var world)
-            ? world.Name.ExtractText()
-            : string.Empty;
     }
 
     private unsafe delegate bool SetContextTellTargetDelegate(
@@ -335,7 +329,7 @@ public class MainWindow : Window, IDisposable
                 var name = playerName->ToString();
                 var world = worldName != null ? worldName->ToString() : string.Empty;
                 if (world.Length == 0)
-                    world = ResolveWorldName(worldId);
+                    world = GameData.WorldName(worldId);
 
                 if (name.Length > 0)
                 {
@@ -453,11 +447,6 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    /// <summary>
-    /// Runs before the game processes input for the tick, so consuming the
-    /// key here keeps the vanilla chat box from opening. Render-time checks
-    /// are too late: the game has already reacted to the key by then.
-    /// </summary>
     private static readonly string[] VanillaChatAddons =
         ["ChatLog", "ChatLogPanel_0", "ChatLogPanel_1", "ChatLogPanel_2", "ChatLogPanel_3"];
 
@@ -493,6 +482,11 @@ public class MainWindow : Window, IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Runs before the game processes input for the tick, so consuming a
+    /// key here keeps the vanilla chat box from opening. Render-time checks
+    /// are too late: the game has already reacted to the key by then.
+    /// </summary>
     private unsafe void OnFrameworkUpdate(Dalamud.Plugin.Services.IFramework framework)
     {
         // Keybinds are polled here, not at draw time: framework update runs
@@ -605,9 +599,15 @@ public class MainWindow : Window, IDisposable
         mainWindowPos = ImGui.GetWindowPos();
         mainWindowSize = ImGui.GetWindowSize();
 
-        localFullName = Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? string.Empty;
-        var firstSpace = localFullName.IndexOf(' ');
-        localFirstName = firstSpace > 0 ? localFullName[..firstSpace] : string.Empty;
+        // PlayerState hands out a cached managed string (no per-frame
+        // SeString parse like LocalPlayer.Name); derive only on change.
+        var fullName = Plugin.PlayerState.IsLoaded ? Plugin.PlayerState.CharacterName : string.Empty;
+        if (fullName != localFullName)
+        {
+            localFullName = fullName;
+            var firstSpace = localFullName.IndexOf(' ');
+            localFirstName = firstSpace > 0 ? localFullName[..firstSpace] : string.Empty;
+        }
 
         // Hashed at window-root scope so tab items can open it from within
         // their own ID scope.
@@ -642,7 +642,7 @@ public class MainWindow : Window, IDisposable
         // unreadable states, and a loading (null) player counts as "in one".
         if (!Plugin.ClientState.IsLoggedIn)
             fcSeen = false;
-        else if (ReadInFreeCompany())
+        else if (!fcSeen && ReadInFreeCompany())
             fcSeen = true;
 
         var inFreeCompany = fcSeen || Plugin.ObjectTable.LocalPlayer == null;
@@ -659,13 +659,9 @@ public class MainWindow : Window, IDisposable
             }
 
             // Constant label (badge drawn as an overlay) so tab widths never
-            // jump when unread counts appear and disappear. The trailing
-            // spaces reserve room for the badge; tell tabs lead with spaces
-            // for the presence dot.
+            // jump when unread counts appear and disappear.
             var showPresence = tab.IsTell && plugin.Configuration.ShowTellPresence;
-            var label = showPresence
-                ? $"  {tab.Title}  ###{tab.Id}"
-                : $"{tab.Title}  ###{tab.Id}";
+            var label = tab.Label(showPresence);
 
             // Consumed when applied: a switch set mid-loop targeting a tab
             // drawn EARLIER in this frame must survive into the next frame's
@@ -730,11 +726,10 @@ public class MainWindow : Window, IDisposable
     /// </summary>
     private static unsafe bool ReadInFreeCompany()
     {
-        var infoModule = FFXIVClientStructs.FFXIV.Client.UI.Info.InfoModule.Instance();
+        var infoModule = InfoModule.Instance();
         var proxy = infoModule == null
             ? null
-            : (FFXIVClientStructs.FFXIV.Client.UI.Info.InfoProxyFreeCompany*)
-              infoModule->GetInfoProxyById(FFXIVClientStructs.FFXIV.Client.UI.Info.InfoProxyId.FreeCompany);
+            : (InfoProxyFreeCompany*)infoModule->GetInfoProxyById(InfoProxyId.FreeCompany);
         if (proxy != null && proxy->NameString.Length > 0)
             return true;
 
@@ -743,11 +738,20 @@ public class MainWindow : Window, IDisposable
     }
 
     /// <summary>True when every channel of the tab is Free Company chat.</summary>
-    private static bool IsFcOnlyTab(TabState tab) =>
-        !tab.IsTell
-        && !tab.CatchAll
-        && tab.Channels is { Count: > 0 } channels
-        && channels.All(c => c == XivChatType.FreeCompany);
+    private static bool IsFcOnlyTab(TabState tab)
+    {
+        if (tab.IsTell || tab.CatchAll || tab.Channels is not { Count: > 0 } channels)
+            return false;
+
+        // foreach: HashSet's struct enumerator, unlike LINQ All (per frame).
+        foreach (var channel in channels)
+        {
+            if (channel != XivChatType.FreeCompany)
+                return false;
+        }
+
+        return true;
+    }
 
     private const string PlayerContextPopup = "player-context";
     private uint tabContextPopupId;
@@ -1171,14 +1175,7 @@ public class MainWindow : Window, IDisposable
             _ => itemId,
         };
 
-        var name = itemId >= 2_000_000
-            ? Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.EventItem>().TryGetRow(baseId, out var eventItem)
-                ? eventItem.Name.ExtractText()
-                : null
-            : Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().TryGetRow(baseId, out var item)
-                ? item.Name.ExtractText()
-                : null;
-
+        var name = GameData.ItemName(baseId, eventItem: itemId >= 2_000_000);
         if (string.IsNullOrEmpty(name))
             return null;
 
@@ -1606,13 +1603,15 @@ public class MainWindow : Window, IDisposable
         // draft, the widget draws its text transparent and the visible text
         // (placeholders in link blue, own caret) is repainted on top by
         // DrawInputTextOverlay.
-        var hasLinkPlaceholder = FindLinkPlaceholders(draft).Count > 0;
+        var placeholders = FindLinkPlaceholders(draft);
+        var hasLinkPlaceholder = placeholders.Count > 0;
+        var draftBeforeInput = draft;
 
         bool submitted;
         using (ImRaii.PushColor(ImGuiCol.Text, Vector4.Zero, hasLinkPlaceholder))
         {
             submitted = ImGui.InputTextWithHint(
-                $"##input{tab.Id}", hint, ref draft, 500,
+                $"##input{tab.Id}", hint, ref draft, ChatSender.MaxBytes,
                 ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CallbackHistory
                 | ImGuiInputTextFlags.CallbackAlways | ImGuiInputTextFlags.CallbackCompletion,
                 InputCallback);
@@ -1620,7 +1619,12 @@ public class MainWindow : Window, IDisposable
         var inputActive = ImGui.IsItemActive();
 
         if (hasLinkPlaceholder)
-            DrawInputTextOverlay(draft, FindLinkPlaceholders(draft), inputActive);
+        {
+            // The widget may have edited the draft this frame; re-scan only then.
+            if (!ReferenceEquals(draft, draftBeforeInput))
+                placeholders = FindLinkPlaceholders(draft);
+            DrawInputTextOverlay(draft, placeholders, inputActive);
+        }
         inputActiveLastFrame = inputActive;
         drafts[tab.Id] = draft;
 
@@ -1649,11 +1653,15 @@ public class MainWindow : Window, IDisposable
 
     private static readonly string[] LinkPlaceholderTokens = ["<item>", "<flag>", "<status>"];
 
+    private static readonly List<(int Start, int Length)> NoSpans = [];
+
     private static List<(int Start, int Length)> FindLinkPlaceholders(string draft)
     {
-        List<(int Start, int Length)> spans = [];
+        // Shared empty result for the common case; callers never mutate it.
         if (draft.Length == 0)
-            return spans;
+            return NoSpans;
+
+        List<(int Start, int Length)> spans = [];
 
         foreach (var token in LinkPlaceholderTokens)
         {
@@ -1762,7 +1770,7 @@ public class MainWindow : Window, IDisposable
                     var prefix = draft[..emote.Groups[1].Index]; // ends with the colon
                     suggestions = Emotes.Query(emote.Groups[1].Value, 8)
                         .Select(e => new CommandEntry(
-                            $"{prefix}{e.Name}:", string.Empty, false,
+                            $"{prefix}{e.Name}:", string.Empty,
                             Display: $":{e.Name}:", Emote: e.Emoji))
                         .ToList();
                     suggestionIndex = 0;
@@ -1830,7 +1838,7 @@ public class MainWindow : Window, IDisposable
         {
             var name = member.Name.TextValue;
             if (name.Length > 0)
-                candidates.Add((PresenceTracker.WithWorld(name, member.World.RowId), "party"));
+                candidates.Add((GameData.WithWorld(name, member.World.RowId), "party"));
         }
 
         foreach (var friend in plugin.Presence.FriendNames())
@@ -1843,14 +1851,14 @@ public class MainWindow : Window, IDisposable
 
             var name = player.Name.TextValue;
             if (name.Length > 0 && name != localFullName)
-                candidates.Add((PresenceTracker.WithWorld(name, player.HomeWorld.RowId), "nearby"));
+                candidates.Add((GameData.WithWorld(name, player.HomeWorld.RowId), "nearby"));
         }
 
         return candidates
             .Where(c => c.Key.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
             .DistinctBy(c => c.Key, StringComparer.OrdinalIgnoreCase)
             .Take(10)
-            .Select(c => new CommandEntry($"{command} {c.Key}", c.Source, false))
+            .Select(c => new CommandEntry($"{command} {c.Key}", c.Source))
             .ToList();
     }
 
@@ -2024,23 +2032,38 @@ public class MainWindow : Window, IDisposable
 
     private void DrawMessage(Message message, int repeats = 1)
     {
-        using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+        // Display strings are cached on the message: this runs for up to
+        // MaxRenderedMessages rows every frame and all inputs are immutable
+        // (the clock format tags its cache and rebuilds on change).
+        var use24h = plugin.Configuration.Use24HourClock;
+        if (message.StampCache == null || message.StampCache24h != use24h)
         {
-            var stamp = plugin.Configuration.Use24HourClock
-                ? message.Timestamp.ToString("HH:mm")
-                : message.Timestamp.ToString("h:mm tt");
-            ImGui.TextUnformatted($"[{stamp}]");
+            message.StampCache24h = use24h;
+            message.StampCache = use24h
+                ? $"[{message.Timestamp:HH:mm}]"
+                : $"[{message.Timestamp:h:mm tt}]";
         }
+
+        using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+            ImGui.TextUnformatted(message.StampCache);
 
         var channelColor = ChatColors.For(message.Type);
 
-        var prefix = FormatPrefix(message);
-        if (prefix.Length > 0)
+        if (!message.HasPrefixCache)
         {
-            var senderLink = message.SenderPlayer != null
-                ? new SegmentLink.Player(message.SenderPlayer)
-                : null;
+            message.HasPrefixCache = true;
+            var prefix = FormatPrefix(message);
+            if (prefix.Length > 0)
+            {
+                message.PrefixCache = new MessageSegment(
+                    prefix + " ",
+                    null,
+                    message.SenderPlayer != null ? new SegmentLink.Player(message.SenderPlayer) : null);
+            }
+        }
 
+        if (message.PrefixCache is { } prefixSegment)
+        {
             var prefixColor = channelColor;
             if (message.SenderJob is { } job)
             {
@@ -2050,7 +2073,7 @@ public class MainWindow : Window, IDisposable
                     prefixColor = roleColor;
             }
 
-            DrawSegmentText(prefix + " ", prefixColor, senderLink);
+            DrawSegment(prefixSegment, prefixColor);
         }
 
         if (message.Segments.Count > 0)
@@ -2066,12 +2089,12 @@ public class MainWindow : Window, IDisposable
                 var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map or SegmentLink.Url
                     ? ChatColors.Link
                     : channelColor;
-                DrawSegmentText(segment.Text, segment.Color ?? fallback, segment.Link);
+                DrawSegment(segment, segment.Color ?? fallback);
             }
         }
         else
         {
-            DrawSegmentText(message.Text, channelColor, null);
+            DrawSegment(message.FallbackCache ??= new MessageSegment(message.Text, null, null), channelColor);
         }
 
         if (repeats > 1)
@@ -2080,8 +2103,8 @@ public class MainWindow : Window, IDisposable
 
     /// <summary>
     /// Inline Twemoji image at text height, continuing the line like a word
-    /// token. False while the texture is unavailable (downloading/failed), so
-    /// the ":shortcode:" text draws instead.
+    /// token. False while the texture isn't ready (pending GPU upload, or it
+    /// failed to load), so the ":shortcode:" text draws instead.
     /// </summary>
     private static bool DrawEmoteToken(MessageSegment segment)
     {
@@ -2090,11 +2113,7 @@ public class MainWindow : Window, IDisposable
             return false;
 
         var size = ImGui.GetTextLineHeight();
-        var lastEnd = ImGui.GetItemRectMax().X;
-        var rightEdge = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
-        if (lastEnd + size <= rightEdge)
-            ImGui.SameLine(0, 0);
-
+        ContinueLineIfFits(size);
         ImGui.Image(wrap.Handle, new Vector2(size, size));
 
         if (ImGui.IsItemHovered())
@@ -2137,36 +2156,64 @@ public class MainWindow : Window, IDisposable
     }
 
     /// <summary>
-    /// Draws text continuing the current chat line, word-wrapping against the
-    /// window edge. Assumes the previous ImGui item is the preceding chunk of
-    /// this same line (the timestamp starts every line).
+    /// Draws a segment continuing the current chat line, word-wrapping
+    /// against the window edge; tokens come from the segment's cache.
+    /// Assumes the previous ImGui item is the preceding chunk of this same
+    /// line (the timestamp starts every line).
+    /// </summary>
+    private void DrawSegment(MessageSegment segment, Vector4 color)
+    {
+        using var c = ImRaii.PushColor(ImGuiCol.Text, color);
+
+        var forceNewLine = false;
+        foreach (var token in segment.Tokens ??= BuildTokens(segment.Text))
+        {
+            if (token == "\n")
+            {
+                forceNewLine = true;
+                continue;
+            }
+
+            DrawToken(token, segment.Link, forceNewLine);
+            forceNewLine = false;
+        }
+    }
+
+    /// <summary>
+    /// Uncached variant of <see cref="DrawSegment"/> for one-off strings
+    /// (the ×N repeat counter).
     /// </summary>
     private void DrawSegmentText(string text, Vector4 color, SegmentLink? link)
     {
         using var c = ImRaii.PushColor(ImGuiCol.Text, color);
 
-        var lines = text.Split('\n');
-        for (var li = 0; li < lines.Length; li++)
+        var forceNewLine = false;
+        foreach (var token in BuildTokens(text))
         {
-            var forceNewLine = li > 0;
-            foreach (var token in Tokenize(lines[li]))
+            if (token == "\n")
             {
-                DrawToken(token, link, forceNewLine);
-                forceNewLine = false;
+                forceNewLine = true;
+                continue;
             }
+
+            DrawToken(token, link, forceNewLine);
+            forceNewLine = false;
         }
+    }
+
+    /// <summary>SameLine-continues the current chat line if the width fits before the window edge.</summary>
+    private static void ContinueLineIfFits(float width)
+    {
+        var lastEnd = ImGui.GetItemRectMax().X;
+        var rightEdge = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
+        if (lastEnd + width <= rightEdge)
+            ImGui.SameLine(0, 0);
     }
 
     private void DrawToken(string token, SegmentLink? link, bool forceNewLine)
     {
         if (!forceNewLine)
-        {
-            var tokenWidth = ImGui.CalcTextSize(token).X;
-            var lastEnd = ImGui.GetItemRectMax().X;
-            var rightEdge = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
-            if (lastEnd + tokenWidth <= rightEdge)
-                ImGui.SameLine(0, 0);
-        }
+            ContinueLineIfFits(ImGui.CalcTextSize(token).X);
 
         ImGui.TextUnformatted(token);
 
@@ -2297,6 +2344,29 @@ public class MainWindow : Window, IDisposable
             Content = content,
             Minimized = true,
         });
+    }
+
+    /// <summary>
+    /// Token list for a piece of chat text: words keeping their trailing
+    /// spaces, with "\n" entries marking forced line breaks.
+    /// </summary>
+    private static string[] BuildTokens(string text)
+    {
+        List<string> tokens = [];
+        var start = 0;
+        while (true)
+        {
+            var newline = text.IndexOf('\n', start);
+            foreach (var token in Tokenize(newline < 0 ? text[start..] : text[start..newline]))
+                tokens.Add(token);
+
+            if (newline < 0)
+                break;
+            tokens.Add("\n");
+            start = newline + 1;
+        }
+
+        return [.. tokens];
     }
 
     /// <summary>Splits a line into words, each keeping its trailing spaces.</summary>

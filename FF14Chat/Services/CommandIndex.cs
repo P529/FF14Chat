@@ -13,7 +13,6 @@ namespace FF14Chat.Services;
 public sealed record CommandEntry(
     string Command,
     string Description,
-    bool FromPlugin,
     string? Display = null,
     string? Emote = null);
 
@@ -33,7 +32,7 @@ public sealed class CommandIndex
         // Plugin commands come and go with plugin loads, so scan them live.
         var pluginEntries = Plugin.CommandManager.Commands
             .Where(kv => kv.Key.Length > 1 && kv.Key[0] == '/')
-            .Select(kv => new CommandEntry(kv.Key, kv.Value.HelpMessage, true));
+            .Select(kv => new CommandEntry(kv.Key, kv.Value.HelpMessage));
 
         return nativeEntries.Concat(pluginEntries)
             .Where(e => e.Command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -56,7 +55,7 @@ public sealed class CommandIndex
             {
                 var command = form.ExtractText();
                 if (command.Length > 1 && command[0] == '/' && seen.Add(command))
-                    result.Add(new CommandEntry(command, description, false));
+                    result.Add(new CommandEntry(command, description));
             }
         }
 

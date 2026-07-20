@@ -105,27 +105,29 @@ public sealed class PresenceTracker : IDisposable
         if (partners.Count == 0)
             return;
 
-        CollectFriends(now, partners);
+        CollectFriends(partners);
         CollectParty(partners);
         CollectNearby(partners);
     }
 
     /// <summary>
-    /// All friends as "Name@World" from the proxy's current snapshot,
-    /// requesting a refresh at most once per interval. The refresh lands
-    /// asynchronously, so a first call may return a stale or empty list.
+    /// Runs the action for every friend in the proxy's current snapshot as
+    /// ("Name@World", raw status), requesting a refresh at most once per
+    /// interval first. The refresh lands asynchronously, so a call may see a
+    /// stale or empty list — callers must tolerate that.
     /// </summary>
-    public unsafe List<string> FriendNames()
+    private unsafe void ForEachFriend(Action<string, InfoProxyCommonList.CharacterData.OnlineStatus> action)
     {
-        var result = new List<string>();
         var infoModule = InfoModule.Instance();
         if (infoModule == null)
-            return result;
+            return;
 
         var proxy = infoModule->GetInfoProxyById(InfoProxyId.FriendList);
         if (proxy == null)
-            return result;
+            return;
 
+        // The proxy only fills on request (the same packet the social window
+        // sends); refresh periodically and read whatever it currently holds.
         var now = DateTime.Now;
         if (now >= nextFriendRequest)
         {
@@ -138,49 +140,33 @@ public sealed class PresenceTracker : IDisposable
         {
             var name = friend.NameString;
             if (name.Length > 0)
-                result.Add(WithWorld(name, friend.HomeWorld));
+                action(GameData.WithWorld(name, friend.HomeWorld), friend.State);
         }
+    }
 
+    /// <summary>All friends as "Name@World" from the current proxy snapshot.</summary>
+    public List<string> FriendNames()
+    {
+        var result = new List<string>();
+        ForEachFriend((key, _) => result.Add(key));
         return result;
     }
 
-    private unsafe void CollectFriends(DateTime now, HashSet<string> partners)
+    private void CollectFriends(HashSet<string> partners)
     {
-        var infoModule = InfoModule.Instance();
-        if (infoModule == null)
-            return;
-
-        var proxy = infoModule->GetInfoProxyById(InfoProxyId.FriendList);
-        if (proxy == null)
-            return;
-
-        // The proxy only fills on request (the same packet the social window
-        // sends); refresh periodically and read whatever it currently holds.
-        if (now >= nextFriendRequest)
+        ForEachFriend((key, state) =>
         {
-            nextFriendRequest = now + FriendRequestInterval;
-            proxy->RequestData();
-        }
-
-        var friendList = (InfoProxyCommonList*)proxy;
-        foreach (ref readonly var friend in friendList->CharDataSpan)
-        {
-            var name = friend.NameString;
-            if (name.Length == 0)
-                continue;
-
-            var key = WithWorld(name, friend.HomeWorld);
             if (!partners.Contains(key))
-                continue;
+                return;
 
-            var status = friend.State == InfoProxyCommonList.CharacterData.OnlineStatus.Offline
+            var status = state == InfoProxyCommonList.CharacterData.OnlineStatus.Offline
                 ? PresenceStatus.Offline
-                : friend.State.HasFlag(InfoProxyCommonList.CharacterData.OnlineStatus.AwayFromKeyboard)
+                : state.HasFlag(InfoProxyCommonList.CharacterData.OnlineStatus.AwayFromKeyboard)
                     ? PresenceStatus.Afk
                     : PresenceStatus.Online;
             observed[key] = status;
             friendStatuses[key] = status;
-        }
+        });
     }
 
     private void CollectParty(HashSet<string> partners)
@@ -191,7 +177,7 @@ public sealed class PresenceTracker : IDisposable
             if (name.Length == 0)
                 continue;
 
-            var key = WithWorld(name, member.World.RowId);
+            var key = GameData.WithWorld(name, member.World.RowId);
             if (!partners.Contains(key))
                 continue;
 
@@ -211,7 +197,7 @@ public sealed class PresenceTracker : IDisposable
             if (name.Length == 0)
                 continue;
 
-            var key = WithWorld(name, player.HomeWorld.RowId);
+            var key = GameData.WithWorld(name, player.HomeWorld.RowId);
             if (!partners.Contains(key))
                 continue;
 
@@ -236,12 +222,5 @@ public sealed class PresenceTracker : IDisposable
 
         foreach (var key in stale)
             map.Remove(key);
-    }
-
-    internal static string WithWorld(string name, uint worldId)
-    {
-        return Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>().TryGetRow(worldId, out var world)
-            ? $"{name}@{world.Name.ExtractText()}"
-            : name;
     }
 }
