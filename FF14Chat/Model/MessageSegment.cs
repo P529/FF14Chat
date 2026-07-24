@@ -15,18 +15,37 @@ public abstract record SegmentLink
 
     /// <summary>Target carries the scheme ("www." text gets https:// prepended).</summary>
     public sealed record Url(string Target) : SegmentLink;
+
+    /// <summary>Id of a completed achievement; opens the Achievement window.</summary>
+    public sealed record Achievement(uint Id) : SegmentLink;
+
+    /// <summary>Party Finder link. Notification opens the finder window; a
+    /// listing (Notification false) opens that specific recruitment.</summary>
+    public sealed record PartyFinder(uint ListingId, bool Notification) : SegmentLink;
+
+    /// <summary>Quest name; opens the quest in the journal.</summary>
+    public sealed record Quest(uint QuestRowId) : SegmentLink;
+
+    /// <summary>Status effect; hover shows its name (no click action).</summary>
+    public sealed record Status(uint StatusId) : SegmentLink;
+
+    /// <summary>A chat link another plugin inserted; click re-fires its handler.</summary>
+    public sealed record Dalamud(DalamudLinkPayload Payload) : SegmentLink;
 }
 
 /// <summary>
 /// A run of text with uniform styling. Color null means "use the channel color".
 /// Emote carries the emoji to draw as a Twemoji image; Text then holds the
 /// ":shortcode:" the emoji replaces, kept as the plaintext/render fallback.
+/// IconId (non-zero) is a game BitmapFontIcon drawn from the font-icon sheet;
+/// Text is then the empty replacement kept as the fallback.
 /// </summary>
 public sealed record MessageSegment(
     string Text,
     Vector4? Color,
     SegmentLink? Link,
-    string? Emote = null)
+    string? Emote = null,
+    uint IconId = 0)
 {
     /// <summary>
     /// Render cache of word tokens ("\n" entries force a line break), built

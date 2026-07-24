@@ -37,6 +37,12 @@ internal static unsafe class NativeItemTooltip
         // Without a tooltip type set, the addon's show handler early-returns.
         stage->TooltipManager.TooltipType |= 2;
         addon->Show(false, 15);
+
+        // Show paints one frame at the addon's last position before Reposition
+        // can run — it needs the post-layout size, which is still zero this
+        // frame. Park it off screen so that first frame isn't a visible flash
+        // at the previous spot; Reposition brings it to the mouse next frame.
+        addon->SetPosition((short)-30000, (short)-30000);
         return true;
     }
 

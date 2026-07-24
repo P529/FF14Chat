@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using Dalamud.Game.Text.SeStringHandling;
@@ -48,9 +49,51 @@ public static partial class MessageParser
                     link = new SegmentLink.Player(FormatPlayer(pp));
                     break;
 
-                // Link payloads end with a raw terminator payload.
-                case RawPayload:
-                    link = null;
+                case QuestPayload qp:
+                    link = new SegmentLink.Quest(qp.Quest.RowId);
+                    break;
+
+                case StatusPayload sp:
+                    link = new SegmentLink.Status(sp.Status.RowId);
+                    break;
+
+                case PartyFinderPayload pf:
+                    link = new SegmentLink.PartyFinder(
+                        pf.ListingId,
+                        pf.LinkType == PartyFinderPayload.PartyFinderLinkType.PartyFinderNotification);
+                    break;
+
+                case DalamudLinkPayload dl:
+                    link = new SegmentLink.Dalamud(dl);
+                    break;
+
+                case IconPayload icon:
+                    segments.Add(new MessageSegment(
+                        string.Empty,
+                        colors.Count > 0 ? colors.Peek() : null,
+                        null,
+                        IconId: (uint)icon.Icon));
+                    break;
+
+                // Link payloads end with a raw terminator payload; achievement
+                // and periodic-recruitment links instead START with an
+                // unrecognized raw payload we decode here (the terminator, and
+                // any other raw payload, falls through to null).
+                case RawPayload rp:
+                    if (rp.Data is { Length: > 5 } && rp.Data[1] == 0x27 && rp.Data[3] == 0x06)
+                    {
+                        using var reader = new BinaryReader(new MemoryStream(rp.Data, 4, rp.Data.Length - 4));
+                        link = new SegmentLink.Achievement(GetInteger(reader));
+                    }
+                    else if (IsPeriodicRecruitment(rp.Data))
+                    {
+                        link = new SegmentLink.PartyFinder(0, Notification: true);
+                    }
+                    else
+                    {
+                        link = null;
+                    }
+
                     break;
 
                 case NewLinePayload:
@@ -202,6 +245,37 @@ public static partial class MessageParser
 
     private static string? ResolveItemName(ItemPayload ip) =>
         GameData.ItemName(ip.ItemId, ip.Kind == ItemKind.EventItem) ?? ip.DisplayName;
+
+    // The "N parties currently recruiting" notification arrives as this fixed
+    // raw link payload (no id); clicking it just opens the Party Finder.
+    private static readonly byte[] PeriodicRecruitment =
+        [0x02, 0x27, 0x07, 0x08, 0x01, 0x01, 0x01, 0xFF, 0x01, 0x03];
+
+    private static bool IsPeriodicRecruitment(byte[] data)
+    {
+        if (data.Length != PeriodicRecruitment.Length)
+            return false;
+        for (var i = 0; i < data.Length; i++)
+        {
+            if (data[i] != PeriodicRecruitment[i])
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Reads FFXIV's variable-length integer encoding (as used by link payload ids).</summary>
+    private static uint GetInteger(BinaryReader input)
+    {
+        var num1 = (uint)input.ReadByte();
+        if (num1 < 208U)
+            return num1 - 1U;
+        var num2 = (uint)((int)num1 + 1 & 15);
+        var numArray = new byte[4];
+        for (var index = 3; index >= 0; --index)
+            numArray[index] = (num2 & 1 << index) == 0L ? (byte)0 : input.ReadByte();
+        return System.BitConverter.ToUInt32(numArray, 0);
+    }
 
     private static Vector4 RgbaToVector(uint rgba) => new(
         ((rgba >> 24) & 0xFF) / 255f,

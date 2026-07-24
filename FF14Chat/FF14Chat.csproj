@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.2.3.1</Version>
+    <Version>0.2.3.2</Version>
     <!-- Keep the packaged zip free of non-Windows sqlite natives, without
          moving the output path Dalamud's dev plugin registration points at. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

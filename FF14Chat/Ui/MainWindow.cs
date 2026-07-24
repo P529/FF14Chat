@@ -628,19 +628,46 @@ public class MainWindow : Window, IDisposable
         DrawHeader();
 
         // Submitted before the tab bar so the arrows win clicks over tabs
-        // beneath them (earliest overlapping ImGui item gets the click).
+        // beneath them (earliest overlapping ImGui item gets the click). Uses
+        // previous-frame strip geometry, incl. the reserved gutters below.
         TabScrollArrowInputs();
 
         if (focusInput)
             ImGui.SetWindowFocus();
 
+        // When the strip overflows we reserve a gutter at each end for the
+        // scroll arrows so they sit in dead space beside the tabs, not over
+        // them (a tab dragged to the edge would otherwise slide under an arrow
+        // and hide its close button). Whether it overflows is only known from
+        // the PREVIOUS frame — the current bar is created by BeginTabBar below —
+        // so on the first overflow frame the gutters are absent and the arrows
+        // appear one frame later; a harmless one-frame settle.
+        //
+        // Gutter width is the tab-header height (== arrow size), stable
+        // frame-to-frame, so it can be computed before the bar exists.
+        var gutter = tabBarOverflowing ? ImGui.GetFrameHeight() : 0f;
+        tabArrowSize = gutter;
+
+        // Left gutter: shift the bar's start right. Right gutter: pull in the
+        // window work-rect right edge (which BeginTabBar reads to size BarRect).
+        // Restored immediately after construction so tab CONTENT (the log/input
+        // child, width -1) still uses the full width.
+        var window = ImGuiP.GetCurrentWindow();
+        var savedWorkRight = window.WorkRect.Max.X;
+        if (gutter > 0f)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + gutter);
+            window.WorkRect.Max.X = savedWorkRight - gutter;
+        }
+
         // FittingPolicyScroll: overflowing tabs scroll horizontally instead of
         // shrinking. The native scroll arrows can't show a disabled state, so
-        // they're hidden and we draw our own (see DrawTabScrollControls).
+        // they're hidden and we draw our own (see DrawTabScrollArrowVisuals).
         using var tabBar = ImRaii.TabBar(
             "##tabs",
             ImGuiTabBarFlags.Reorderable | ImGuiTabBarFlags.FittingPolicyScroll
             | ImGuiTabBarFlags.NoTabListScrollingButtons);
+        window.WorkRect.Max.X = savedWorkRight;
         if (!tabBar.Success)
             return;
 
@@ -700,9 +727,13 @@ public class MainWindow : Window, IDisposable
 
                     if (showPresence)
                         DrawPresenceDot(tab);
-                    DrawUnreadBadge(tab);
+                    // The selected tab reads itself (DrawTab marks it read); a
+                    // badge there would flash for the one frame between a message
+                    // arriving and that mark-read, so only unselected tabs badge.
                     if (item.Success)
                         DrawTab(tab);
+                    else
+                        DrawUnreadBadge(tab);
                 }
 
                 if (!open)
@@ -717,9 +748,10 @@ public class MainWindow : Window, IDisposable
             {
                 using var item = ImRaii.TabItem(label, itemFlags);
                 imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
-                DrawUnreadBadge(tab);
                 if (item.Success)
                     DrawTab(tab);
+                else
+                    DrawUnreadBadge(tab);
             }
         }
 
@@ -842,13 +874,25 @@ public class MainWindow : Window, IDisposable
     private bool leftArrowHovered;
     private bool rightArrowHovered;
 
-    private float TabArrowSize => tabStripMax.Y - tabStripMin.Y;
+    // Set from last frame's tabScrollMax; drives this frame's gutter reservation
+    // (decided before BeginTabBar creates the current bar — see Draw).
+    private bool tabBarOverflowing;
+
+    // Reserved gutter width for this frame's arrows. Equals the tab-header
+    // height, chosen before the bar exists so arrow inputs/visuals match the
+    // inset applied to the bar. Zero when the strip fits (no gutters, no arrows).
+    private float tabArrowSize;
+
+    private float TabArrowSize => tabArrowSize;
 
     private bool LeftArrowEnabled => tabScrollCurrent > 0.5f;
     private bool RightArrowEnabled => tabScrollCurrent < tabScrollMax - 0.5f;
 
-    private Vector2 LeftArrowPos => tabStripMin;
-    private Vector2 RightArrowPos => new(tabStripMax.X - TabArrowSize, tabStripMin.Y);
+    // Arrows live in the reserved gutters, OUTSIDE the inset strip: the left one
+    // just left of tabStripMin, the right one just right of tabStripMax. So a
+    // tab dragged to either edge stays fully visible between them.
+    private Vector2 LeftArrowPos => new(tabStripMin.X - TabArrowSize, tabStripMin.Y);
+    private Vector2 RightArrowPos => new(tabStripMax.X, tabStripMin.Y);
 
     /// <summary>Invisible click-catchers for the scroll arrows.</summary>
     private void TabScrollArrowInputs()
@@ -885,13 +929,24 @@ public class MainWindow : Window, IDisposable
         tabStripMax = bar.BarRect.Max;
         tabScrollMax = Math.Max(0f, bar.WidthAllTabs - (tabStripMax.X - tabStripMin.X));
 
-        var mouse = ImGui.GetMousePos();
-        var overBar = ImGui.IsWindowHovered()
-                      && mouse.X >= tabStripMin.X && mouse.X <= tabStripMax.X
-                      && mouse.Y >= tabStripMin.Y && mouse.Y <= tabStripMax.Y;
+        // Latched for next frame's gutter decision (the bar for the NEXT frame
+        // doesn't exist yet when we must decide whether to inset it). Once the
+        // inset strip overflows, keeping the gutters keeps it overflowing, so
+        // the state latches on rather than oscillating at the fit boundary.
+        tabBarOverflowing = tabScrollMax > 0f;
+
+        // Wheel over the strip scrolls it. IsWindowHovered() (used before) reads
+        // false while the cursor is over a TabItem header — a hovered/active item
+        // suppresses the plain window-hover test, so the wheel never fired there.
+        // A pure geometric hit-test against the strip rect avoids that entirely.
+        // NoScrollWithMouse (window flag) only stops ImGui from APPLYING wheel to
+        // the window's own scroll; it does not zero io.MouseWheel, so we still see it.
         var wheel = ImGui.GetIO().MouseWheel;
-        if (overBar && wheel != 0f)
+        if (tabScrollMax > 0f && wheel != 0f
+            && ImGui.IsMouseHoveringRect(tabStripMin, tabStripMax))
+        {
             pendingTabScroll -= wheel * 80f;
+        }
 
         if (pendingTabScroll != 0f)
         {
@@ -915,8 +970,8 @@ public class MainWindow : Window, IDisposable
     {
         var size = TabArrowSize;
         var drawList = ImGui.GetWindowDrawList();
-        // Backing so the arrow reads over the tabs scrolling beneath it.
-        drawList.AddRectFilled(pos, pos + new Vector2(size, size), ImGui.GetColorU32(FFTheme.BgBottom with { W = 0.85f }), 2f);
+        // No backing rect anymore: the arrows sit in reserved gutters (dead
+        // space beside the tabs), so there are no tabs scrolling beneath them.
 
         var color = !enabled
             ? FFTheme.TextDim with { W = 0.35f }
@@ -2170,13 +2225,21 @@ public class MainWindow : Window, IDisposable
         {
             foreach (var segment in message.Segments)
             {
+                // Icon segments have empty text: draw the glyph, or skip the
+                // segment entirely if the texture isn't ready this frame.
+                if (segment.IconId != 0)
+                {
+                    DrawIconToken(segment);
+                    continue;
+                }
+
                 if (segment.Emote != null && plugin.Configuration.RenderEmotes
                     && DrawEmoteToken(segment))
                     continue;
 
                 // Item/map links stand out even when the game didn't color
                 // them itself, so they read as clickable.
-                var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map or SegmentLink.Url
+                var fallback = segment.Link is SegmentLink.Item or SegmentLink.Map or SegmentLink.Url or SegmentLink.Achievement or SegmentLink.PartyFinder or SegmentLink.Quest or SegmentLink.Dalamud
                     ? ChatColors.Link
                     : channelColor;
                 DrawSegment(segment, segment.Color ?? fallback);
@@ -2213,6 +2276,35 @@ public class MainWindow : Window, IDisposable
             ImGui.TextUnformatted(segment.Text);
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Inline game bitmap-font icon (gil, HQ, element glyphs, etc.) at text
+    /// height, continuing the line like a word token. False while the atlas
+    /// entry or texture isn't ready; the icon has no text, so nothing draws.
+    /// </summary>
+    private static bool DrawIconToken(MessageSegment segment)
+    {
+        if (!GameIcons.TryGetEntry(segment.IconId, out var entry))
+            return false;
+
+        var tex = Plugin.TextureProvider.GetFromGame("common/font/fonticon_ps5.tex").GetWrapOrDefault();
+        if (tex == null)
+            return false;
+
+        var texSize = new Vector2(tex.Width, tex.Height);
+        var lineHeight = ImGui.GetTextLineHeight();
+        var ratio = lineHeight / entry.Height;
+        var size = new Vector2(entry.Width, entry.Height) * ratio;
+
+        // fonticon_ps5.tex is the hi-res (2x) sheet; the +170 row offset and the
+        // *2 scaling on the atlas rect are specific to it (per ChatTwo).
+        var uv0 = new Vector2(entry.Left, entry.Top + 170) * 2 / texSize;
+        var uv1 = new Vector2(entry.Left + entry.Width, entry.Top + entry.Height + 170) * 2 / texSize;
+
+        ContinueLineIfFits(size.X);
+        ImGui.Image(tex.Handle, size, uv0, uv1);
         return true;
     }
 
@@ -2352,6 +2444,40 @@ public class MainWindow : Window, IDisposable
                     Dalamud.Utility.Util.OpenLink(url.Target);
                 break;
 
+            case SegmentLink.Achievement achievement:
+                ImGui.SetTooltip("Click: open achievement");
+                if (clicked)
+                    AchievementActions.Open(achievement.Id);
+                break;
+
+            case SegmentLink.PartyFinder partyFinder:
+                ImGui.SetTooltip("Click: open Party Finder");
+                if (clicked)
+                {
+                    if (partyFinder.Notification)
+                        PartyFinderActions.OpenWindow();
+                    else
+                        PartyFinderActions.OpenListing(partyFinder.ListingId);
+                }
+
+                break;
+
+            case SegmentLink.Quest quest:
+                ImGui.SetTooltip("Click: open in journal");
+                if (clicked)
+                    QuestActions.Open(quest.QuestRowId);
+                break;
+
+            case SegmentLink.Status status:
+                ImGui.SetTooltip(StatusName(status.StatusId));
+                break;
+
+            case SegmentLink.Dalamud dalamud:
+                ImGui.SetTooltip("Click: follow link");
+                if (clicked)
+                    ChatLinkActions.Invoke(dalamud.Payload);
+                break;
+
             case SegmentLink.Player player:
                 ImGui.SetTooltip($"{player.Partner}\nClick: open tell tab — right-click: menu");
                 if (clicked)
@@ -2370,6 +2496,13 @@ public class MainWindow : Window, IDisposable
                 break;
         }
     }
+
+    /// <summary>Status effect name from Lumina, falling back to an id string.</summary>
+    private static string StatusName(uint statusId) =>
+        Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Status>().TryGetRow(statusId, out var row)
+        && row.Name.ExtractText() is { Length: > 0 } name
+            ? name
+            : $"Status #{statusId}";
 
     private static Vector4 RarityColor(byte rarity) => rarity switch
     {
