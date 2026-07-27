@@ -31,6 +31,6 @@ public sealed class Message
     internal string? StampCache;
     internal bool StampCache24h;
     internal bool HasPrefixCache;
-    internal MessageSegment? PrefixCache;
+    internal IReadOnlyList<MessageSegment>? PrefixCache;
     internal MessageSegment? FallbackCache;
 }

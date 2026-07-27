@@ -95,7 +95,7 @@ public class MainWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(400, 250),
+            MinimumSize = new Vector2(250, 150),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
         Size = new Vector2(600, 400);
@@ -2197,17 +2197,10 @@ public class MainWindow : Window, IDisposable
         if (!message.HasPrefixCache)
         {
             message.HasPrefixCache = true;
-            var prefix = FormatPrefix(message);
-            if (prefix.Length > 0)
-            {
-                message.PrefixCache = new MessageSegment(
-                    prefix + " ",
-                    null,
-                    message.SenderPlayer != null ? new SegmentLink.Player(message.SenderPlayer) : null);
-            }
+            message.PrefixCache = BuildPrefixSegments(message);
         }
 
-        if (message.PrefixCache is { } prefixSegment)
+        if (message.PrefixCache is { Count: > 0 } prefixSegments)
         {
             var prefixColor = channelColor;
             if (message.SenderJob is { } job)
@@ -2218,7 +2211,18 @@ public class MainWindow : Window, IDisposable
                     prefixColor = roleColor;
             }
 
-            DrawSegment(prefixSegment, prefixColor);
+            foreach (var segment in prefixSegments)
+            {
+                // Icon segments (the cross-world glyph) have empty text; draw
+                // the glyph, or skip it if the texture isn't ready this frame.
+                if (segment.IconId != 0)
+                {
+                    DrawIconToken(segment);
+                    continue;
+                }
+
+                DrawSegment(segment, segment.Color ?? prefixColor);
+            }
         }
 
         if (message.Segments.Count > 0)
@@ -2613,22 +2617,52 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    private static string FormatPrefix(Message message)
+    /// <summary>Opening/closing affixes around the sender name per channel, or null for no prefix.</summary>
+    private static (string Open, string Close)? PrefixDecoration(Message message)
     {
         if (message.Sender.Length == 0)
-            return string.Empty;
+            return null;
 
         // Masked for the same reason as the channel color lookup.
         return ChatTypes.Mask(message.Type) switch
         {
-            XivChatType.TellIncoming => $"{message.Sender} >>",
-            XivChatType.TellOutgoing => $">> {message.Sender}:",
-            XivChatType.Party or XivChatType.CrossParty => $"({message.Sender})",
-            XivChatType.Alliance => $"(({message.Sender}))",
+            XivChatType.TellIncoming => ("", " >>"),
+            XivChatType.TellOutgoing => (">> ", ":"),
+            XivChatType.Party or XivChatType.CrossParty => ("(", ")"),
+            XivChatType.Alliance => ("((", "))"),
             // Emote messages already contain the player's name in the text.
-            XivChatType.CustomEmote or XivChatType.StandardEmote => string.Empty,
-            XivChatType.FreeCompany => $"[FC]<{message.Sender}>",
-            _ => $"{message.Sender}:",
+            XivChatType.CustomEmote or XivChatType.StandardEmote => null,
+            XivChatType.FreeCompany => ("[FC]<", ">"),
+            _ => ("", ":"),
         };
+    }
+
+    /// <summary>
+    /// Builds the sender prefix as styled segments. The sender is parsed from
+    /// its raw SeString (not the flattened text) so a cross-world player's
+    /// world icon survives and their name stays separated from the world it
+    /// precedes. Returns null for channels that carry no prefix.
+    /// </summary>
+    private static IReadOnlyList<MessageSegment>? BuildPrefixSegments(Message message)
+    {
+        if (PrefixDecoration(message) is not { } decoration)
+            return null;
+
+        var (open, close) = decoration;
+        var link = message.SenderPlayer != null ? new SegmentLink.Player(message.SenderPlayer) : null;
+        var segments = new List<MessageSegment>();
+
+        if (open.Length > 0)
+            segments.Add(new MessageSegment(open, null, link));
+
+        // Parsed sender segments: text runs inherit the player link so the
+        // whole prefix is one click target; icon segments (the cross-world
+        // glyph) pass through so DrawIconToken renders them.
+        var sender = Dalamud.Game.Text.SeStringHandling.SeString.Parse(message.SenderRaw);
+        foreach (var segment in MessageParser.Parse(sender))
+            segments.Add(segment.Link == null ? segment with { Link = link } : segment);
+
+        segments.Add(new MessageSegment(close + " ", null, link));
+        return segments;
     }
 }
