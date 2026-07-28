@@ -14,6 +14,12 @@
         "resolved": "1.2.39",
         "contentHash": "fcFN01tDTIQqDuTwr1jUQK/geofiwjG5DycJQOnC72i1SsLAk1ELe+apBOuZ11UMQG8YKFZG1FgvjZPbqHyatg=="
       },
+      "GTranslate": {
+        "type": "Direct",
+        "requested": "[2.3.1, )",
+        "resolved": "2.3.1",
+        "contentHash": "bHT6UbYjVWCmhNyxt73NEyJtE1tDl9OMrIGIMypn3DPD7S7pjUVbS1TyZF6N8V2qtn9mSlaiu+6XbecIvjQZ8w=="
+      },
       "Microsoft.Data.Sqlite": {
         "type": "Direct",
         "requested": "[10.0.9, )",

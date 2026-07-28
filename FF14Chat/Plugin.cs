@@ -4,6 +4,7 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using FF14Chat.Services;
+using FF14Chat.Services.Translation;
 using FF14Chat.Ui;
 
 namespace FF14Chat;
@@ -38,6 +39,7 @@ public sealed class Plugin : IDalamudPlugin
     public TabManager TabManager { get; init; }
     public MessageDatabase Database { get; init; }
     public PresenceTracker Presence { get; init; }
+    public TranslationService Translation { get; init; }
 
     public readonly WindowSystem WindowSystem = new("FF14Chat");
     private ChatCapture ChatCapture { get; init; }
@@ -147,7 +149,14 @@ public sealed class Plugin : IDalamudPlugin
         HydrateFromDatabase();
 
         Presence = new PresenceTracker(TabManager);
-        ChatCapture = new ChatCapture(MessageStore, TabManager, Database, Presence);
+
+        // Constructed after hydration so restoring hundreds of stored lines
+        // cannot fire hundreds of API calls on login.
+        Translation = new TranslationService(Configuration);
+        Translation.Changed += OnTranslationChanged;
+        Framework.Update += OnFrameworkUpdate;
+
+        ChatCapture = new ChatCapture(MessageStore, TabManager, Database, Presence, Translation);
 
         MainWindow = new MainWindow(this, TabManager);
         SettingsWindow = new SettingsWindow(this, MainWindow);
@@ -169,11 +178,14 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
+        Framework.Update -= OnFrameworkUpdate;
+        Translation.Changed -= OnTranslationChanged;
 
         WindowSystem.RemoveAllWindows();
         SettingsWindow.Dispose();
         MainWindow.Dispose();
         ChatCapture.Dispose();
+        Translation.Dispose();
         Presence.Dispose();
         Database.Dispose();
         Emotes.Dispose();
@@ -237,6 +249,34 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var tab in TabManager.Snapshot())
             TabManager.MarkRead(tab);
         TabManager.ApplySavedOrder();
+    }
+
+    // Set on a translation worker thread, consumed on the framework thread
+    // (which is also the draw thread) so the renderer state below is only ever
+    // touched from where it belongs.
+    private volatile bool translationsChanged;
+
+    private void OnTranslationChanged() => translationsChanged = true;
+
+    private void OnFrameworkUpdate(IFramework framework)
+    {
+        if (!translationsChanged)
+            return;
+
+        translationsChanged = false;
+
+        // A resolved translation changes what an already-rendered message
+        // draws but adds no message, so no tab revision moved and the log
+        // would keep its stale layout. Rewinding RenderedRevision makes the
+        // next frame count as new content — which is what re-pins a
+        // bottom-pinned view as the extra line appears — without bumping
+        // Revision and needlessly rebuilding every tab's snapshot. -1 is the
+        // never-drawn sentinel and would force a pin, so stop above it.
+        foreach (var tab in TabManager.Snapshot())
+        {
+            if (tab.RenderedRevision > 0)
+                tab.RenderedRevision--;
+        }
     }
 
     private void OnCommand(string command, string args) => MainWindow.Toggle();

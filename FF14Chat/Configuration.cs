@@ -14,6 +14,17 @@ public enum ChatTheme
     Ff7Remake = 3,
 }
 
+public enum TranslationProviderKind
+{
+    DeepL = 0,
+    Anthropic = 1,
+    OpenAiCompatible = 2,
+
+    /// <summary>Google/Bing/Yandex free web endpoints, no account; see
+    /// <see cref="Services.Translation.MachineTranslateProvider"/>.</summary>
+    MachineTranslate = 3,
+}
+
 [Serializable]
 public class TabConfig
 {
@@ -126,6 +137,63 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Window background opacity (0.3 – 1.0).</summary>
     public float BgOpacity { get; set; } = 0.78f;
+
+    /// <summary>Translate arriving messages into <see cref="TargetLanguage"/>.</summary>
+    public bool TranslateIncoming { get; set; }
+
+    /// <summary>Offer translating typed input into <see cref="OutgoingLanguage"/> before sending.</summary>
+    public bool TranslateOutgoing { get; set; }
+
+    /// <summary>Active translation backend, see <see cref="TranslationProviderKind"/>.
+    /// Defaults to the keyless one so translation works before any setup.</summary>
+    public int TranslationProvider { get; set; } = (int)TranslationProviderKind.MachineTranslate;
+
+    /// <summary>DeepL auth key; free-tier keys end in ":fx" and select the free host.</summary>
+    public string DeepLApiKey { get; set; } = "";
+
+    /// <summary>API key for the Anthropic / OpenAI-compatible backend.</summary>
+    public string LlmApiKey { get; set; } = "";
+
+    /// <summary>Model id passed to the LLM backend.</summary>
+    public string LlmModel { get; set; } = "claude-haiku-4-5-20251001";
+
+    /// <summary>Base URL of the OpenAI-compatible backend; "/chat/completions" is appended.</summary>
+    public string LlmBaseUrl { get; set; } = "https://api.openai.com/v1";
+
+    /// <summary>The outbound-data warning has been shown and accepted once; the
+    /// keyless default means nothing else stands between a toggle and a request.</summary>
+    public bool TranslationConsent { get; set; }
+
+    /// <summary>When the chosen backend fails or is rate limited, translate through
+    /// the free Google/Bing/Yandex endpoints instead of dropping the line.</summary>
+    public bool FallbackToFree { get; set; } = true;
+
+    /// <summary>Language incoming messages are translated into (DeepL target code).</summary>
+    public string TargetLanguage { get; set; } = "EN-US";
+
+    /// <summary>Language outgoing input is translated into (DeepL target code).</summary>
+    public string OutgoingLanguage { get; set; } = "JA";
+
+    // Replace: see TabConfig.Channels — appending duplicated every entry on load.
+    /// <summary>Which player channels get translated; starts as all of them.
+    /// System and NPC kinds are never eligible, so they are not in this set.</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public HashSet<XivChatType> TranslateChannels { get; set; } = [.. Services.ChatTypes.PlayerChat];
+
+    /// <summary>Translated-line color, RGBA-packed; 0 uses the built-in default.</summary>
+    public uint TranslationColor { get; set; }
+
+    /// <summary>Don't spend quota translating the local player's own lines.</summary>
+    public bool SkipOwnMessages { get; set; } = true;
+
+    /// <summary>Lines longer than this are never translated; guards against pasted walls of text.</summary>
+    public int MaxTranslateChars { get; set; } = 300;
+
+    /// <summary>Running total of characters sent to the translation API.</summary>
+    public long TranslationCharsUsed { get; set; }
+
+    /// <summary>Hovering a translated line shows the original and detected language.</summary>
+    public bool ShowTranslationTooltip { get; set; } = true;
 
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
 

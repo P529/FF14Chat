@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Keys;
@@ -14,6 +17,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.Hooking;
 using FF14Chat.Model;
 using FF14Chat.Services;
+using FF14Chat.Services.Translation;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
@@ -39,6 +43,24 @@ public class MainWindow : Window, IDisposable
     private string historyStash = string.Empty;
     private bool focusInput;
     private bool suppressEnterUntilReleased;
+
+    // A send that needs its text translated first can't block the draw thread,
+    // so it finishes on a continuation. Only one runs at a time (see Submit);
+    // the tab it belongs to drives the input's "translating" hint.
+    private Task? pendingSend;
+    private string? pendingSendTabId;
+
+    /// <summary>Text handed back to the draw thread by a failed translated send.</summary>
+    private sealed record PendingRestore(string TabId, string Draft, string Reason);
+
+    // Written by the send continuation, consumed by DrawInput: `drafts`, the
+    // history and notifications are all draw-thread state. Swapping one whole
+    // record keeps the handover a single atomic reference write.
+    private volatile PendingRestore? pendingDraftRestore;
+
+    // Draft to push into the widget's own buffer via InputCallback, for the
+    // case where the restore lands while the field still has focus.
+    private string? restoreDraftRequested;
 
     private readonly CommandIndex commandIndex = new();
     private readonly GameChatKeybinds gameKeybinds = new();
@@ -811,6 +833,68 @@ public class MainWindow : Window, IDisposable
     /// header). Entity-bound actions gray out while the player is not nearby.
     /// Must be called in the same ID scope its popup id was hashed in.
     /// </summary>
+    private const string MessageContextPopup = "message-context";
+    private uint messageContextPopupId;
+    private Message? contextMessage;
+
+    /// <summary>True once a link's own menu has taken this frame's right-click.</summary>
+    private bool linkClaimedRightClick;
+
+    /// <summary>
+    /// Right-click menu for a whole message row: translate this one line on
+    /// demand, whether or not automatic translation is on, and put it back.
+    /// </summary>
+    private void DrawMessageContextMenu()
+    {
+        if (contextMessage is not { } message)
+            return;
+
+        using var popup = ImRaii.Popup(MessageContextPopup);
+        if (!popup.Success)
+            return;
+
+        var translation = message.Translation;
+        if (translation is { Status: TranslationStatus.Done, Text: not null })
+        {
+            if (ImGui.Selectable("Show original"))
+                TranslationService.ShowOriginal(message);
+        }
+        else
+        {
+            var busy = translation is { Status: TranslationStatus.Pending };
+            var paused = plugin.Translation.Paused;
+            using (ImRaii.Disabled(busy || paused))
+            {
+                if (ImGui.Selectable(busy ? "Translating…" : "Translate"))
+                    plugin.Translation.RequestManual(message);
+            }
+
+            // This is the one path that sends text without the settings tab's
+            // confirmation in front of it, so it names its destination here.
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.SetTooltip(paused
+                    ? plugin.Translation.LastError ?? "Translation is paused."
+                    : $"Sends this line to {ProviderName()}.");
+            }
+        }
+
+        if (ImGui.Selectable("Copy Text"))
+        {
+            ImGui.SetClipboardText(message.Text);
+            Notify("Copied message text");
+        }
+    }
+
+    /// <summary>Where a translation request would go, for the menu tooltip.</summary>
+    private string ProviderName() => (TranslationProviderKind)plugin.Configuration.TranslationProvider switch
+    {
+        TranslationProviderKind.DeepL => "DeepL",
+        TranslationProviderKind.Anthropic => "Anthropic",
+        TranslationProviderKind.OpenAiCompatible => "the configured API endpoint",
+        _ => "Google, Bing or Yandex translate",
+    };
+
     private void DrawPlayerContextMenu()
     {
         if (contextPartner is not { } partner)
@@ -1267,6 +1351,15 @@ public class MainWindow : Window, IDisposable
         // within message rows, DrawPlayerContextMenu below begins it here.
         logContextPopupId = ImGui.GetID(PlayerContextPopup);
         itemContextPopupId = ImGui.GetID(ItemContextPopup);
+        messageContextPopupId = ImGui.GetID(MessageContextPopup);
+
+        // Rearmed by whichever row is hovered this frame; cleared here so it
+        // can't linger once the cursor leaves.
+        pendingTranslationTooltip = null;
+
+        // A link under the cursor owns the right-click (its menu is the more
+        // specific one); the row menu only takes what no link claimed.
+        linkClaimedRightClick = false;
 
         var messages = tabs.MessagesSnapshot(tab);
         // First draw of a tab (e.g. history just hydrated) starts pinned.
@@ -1305,9 +1398,18 @@ public class MainWindow : Window, IDisposable
             var lineWidth = ImGui.GetContentRegionAvail().X;
             DrawMessage(messages[i], repeats);
 
+            var rowBottom = ImGui.GetItemRectMax().Y;
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right)
+                && !linkClaimedRightClick
+                && ImGui.IsMouseHoveringRect(lineStart, new Vector2(lineStart.X + lineWidth, rowBottom)))
+            {
+                contextMessage = messages[i];
+                ImGui.OpenPopup(messageContextPopupId);
+            }
+
             if (IsMention(messages[i]))
             {
-                var bottom = ImGui.GetItemRectMax().Y;
+                var bottom = rowBottom;
                 var drawList = ImGui.GetWindowDrawList();
                 drawList.AddRectFilled(
                     lineStart, new Vector2(lineStart.X + lineWidth, bottom),
@@ -1318,8 +1420,12 @@ public class MainWindow : Window, IDisposable
             }
         }
 
+        if (pendingTranslationTooltip is { } tooltip)
+            DrawTranslationTooltip(tooltip.Message, tooltip.Translation);
+
         DrawPlayerContextMenu();
         DrawItemContextMenu();
+        DrawMessageContextMenu();
 
         if (pinnedToBottom && newMessages)
             ImGui.SetScrollHereY(1f);
@@ -1616,6 +1722,25 @@ public class MainWindow : Window, IDisposable
     private void DrawInput(TabState tab)
     {
         inputTab = tab;
+
+        // A failed translated send hands its text back here instead of writing
+        // `drafts` from its continuation thread.
+        if (pendingDraftRestore is { } restore)
+        {
+            pendingDraftRestore = null;
+            drafts[restore.TabId] = restore.Draft;
+
+            // The widget owns its buffer while focused, so an external draft
+            // write is dropped there — route it through the callback like the
+            // other programmatic edits. Focus is deliberately not stolen back:
+            // the send already handed control to the game and this lands at an
+            // arbitrary moment, possibly mid-fight.
+            if (restore.TabId == tab.Id && inputActiveLastFrame)
+                restoreDraftRequested = restore.Draft;
+
+            Notify(restore.Reason);
+        }
+
         drafts.TryGetValue(tab.Id, out var draft);
         draft ??= string.Empty;
 
@@ -1670,11 +1795,17 @@ public class MainWindow : Window, IDisposable
             }
         }
 
-        var hint = tab.IsTell
-            ? $"Message {tab.Title}…"
-            : destination is { Label.Length: > 0 } dest
-                ? $"{dest.Label}…"
-                : "Chat or /command…";
+        // While a translated send is in flight the placeholder doubles as its
+        // progress indicator: the field stays fully usable, and it is empty
+        // right after a submit — exactly when a hint is visible.
+        var translating = pendingSend is { IsCompleted: false } && pendingSendTabId == tab.Id;
+        var hint = translating
+            ? "Translating…"
+            : tab.IsTell
+                ? $"Message {tab.Title}…"
+                : destination is { Label.Length: > 0 } dest
+                    ? $"{dest.Label}…"
+                    : "Chat or /command…";
         var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
 
@@ -1697,6 +1828,11 @@ public class MainWindow : Window, IDisposable
                 InputCallback);
         }
         var inputActive = ImGui.IsItemActive();
+
+        // Dropped if the callback never ran (the field lost focus in the same
+        // frame the restore landed): the plain `drafts` write already covers
+        // that case, and a stale request would clobber the next thing typed.
+        restoreDraftRequested = null;
 
         if (hasLinkPlaceholder)
         {
@@ -2013,6 +2149,16 @@ public class MainWindow : Window, IDisposable
     {
         if (data.EventFlag == ImGuiInputTextFlags.CallbackAlways)
         {
+            // A failed translated send handing its text back while the field
+            // is still focused. Same reason as the Space acceptance below: an
+            // external draft write is ignored once the widget owns its buffer.
+            if (restoreDraftRequested is { } restored)
+            {
+                restoreDraftRequested = null;
+                data.DeleteChars(0, data.BufTextLen);
+                data.InsertChars(0, restored);
+            }
+
             // Programmatic focus selects the whole buffer; typing would then
             // replace it. Put the cursor at the end with nothing selected.
             if (clearSelection)
@@ -2137,21 +2283,39 @@ public class MainWindow : Window, IDisposable
         return 0;
     }
 
+    /// <summary>
+    /// True when the draft was consumed (clear it and release focus), false to
+    /// keep both so the user can fix it. A send needing outgoing translation
+    /// reports consumed immediately and finishes asynchronously.
+    /// </summary>
     private bool Submit(TabState tab, string draft)
     {
         var text = draft.Trim();
         if (text.Length == 0)
             return true;
 
-        var toSend = text[0] == '/'
-            ? text
-            : tab.IsTell
-                ? $"/tell {tab.TellPartner} {text}"
-                : tab.SendCommand is { Length: > 0 } sendCommand
-                    ? $"{sendCommand} {text}"
-                    : text;
+        // Commands address the game, not a person, so they are never
+        // translated and keep the synchronous path exactly as it was.
+        if (text[0] != '/' && plugin.Configuration.TranslateOutgoing)
+        {
+            // Rejected rather than queued: translations complete out of order,
+            // so a queue could put a later line on the wire before an earlier
+            // one, and the window being contested is a single round trip.
+            if (pendingSend is { IsCompleted: false })
+            {
+                Notify("Still translating the previous message.");
+                return false;
+            }
 
-        if (!ChatSender.Send(toSend))
+            // Recorded here, on the draw thread, and from the ORIGINAL text:
+            // history is what the user typed, not what went out.
+            RecordHistory(text);
+            pendingSendTabId = tab.Id;
+            pendingSend = SendTranslatedAsync(tab, text);
+            return true;
+        }
+
+        if (!ChatSender.Send(text[0] == '/' ? text : ApplyDestination(tab, text)))
         {
             // The only false path is the length cap — easy to hit in a tell
             // tab, where "/tell Name@World " is prepended after the input's
@@ -2160,6 +2324,20 @@ public class MainWindow : Window, IDisposable
             return false;
         }
 
+        RecordHistory(text);
+        return true;
+    }
+
+    /// <summary>Prefixes the tab's destination onto a plain (non-command) message.</summary>
+    private static string ApplyDestination(TabState tab, string text) =>
+        tab.IsTell
+            ? $"/tell {tab.TellPartner} {text}"
+            : tab.SendCommand is { Length: > 0 } sendCommand
+                ? $"{sendCommand} {text}"
+                : text;
+
+    private void RecordHistory(string text)
+    {
         if (sentHistory.Count == 0 || sentHistory[^1] != text)
         {
             sentHistory.Add(text);
@@ -2169,7 +2347,61 @@ public class MainWindow : Window, IDisposable
 
         historyPos = -1;
         historyStash = string.Empty;
-        return true;
+    }
+
+    // Past this the input has been sitting empty long enough that a message
+    // finally going out is more surprising than one that never did.
+    private static readonly TimeSpan OutgoingTranslateTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Translates a typed line and sends the translation in its place (the
+    /// original is not appended). Runs off the draw thread, so a failure hands
+    /// the text back through <see cref="pendingDraftRestore"/> rather than
+    /// touching the drafts, the history or the notification queue from here.
+    /// </summary>
+    private async Task SendTranslatedAsync(TabState tab, string text)
+    {
+        string? failure;
+        try
+        {
+            using var cts = new CancellationTokenSource(OutgoingTranslateTimeout);
+            var translated = await plugin.Translation
+                .TranslateOutgoingAsync(text, cts.Token)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(translated))
+            {
+                // The provider's own reason when there is one: the common case
+                // is outgoing translation switched on with no API key behind
+                // it, and "translation failed" alone gives nothing to act on.
+                failure = plugin.Translation.LastError is { Length: > 0 } reason
+                    ? $"Not sent — {reason}"
+                    : "Translation failed; message not sent.";
+            }
+            else
+            {
+                // Send re-checks the UTF-8 cap and false means only that —
+                // the check that matters here, because a translation is easily
+                // longer than what was typed and the prefix lands on top of it.
+                failure = ChatSender.Send(ApplyDestination(tab, translated))
+                    ? null
+                    : "Translation too long to send.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            failure = "Translation timed out; message not sent.";
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "Outgoing translation failed");
+            failure = "Translation failed; message not sent.";
+        }
+
+        // Published before this method completes, so the draw thread can never
+        // observe pendingSend as finished without also seeing the restore.
+        if (failure != null)
+            pendingDraftRestore = new PendingRestore(tab.Id, text, failure);
     }
 
     private void DrawMessage(Message message, int repeats = 1)
@@ -2225,7 +2457,21 @@ public class MainWindow : Window, IDisposable
             }
         }
 
-        if (message.Segments.Count > 0)
+        // Read once per draw: the field is published by the translation worker
+        // and can change between two reads inside the same frame.
+        var translation = message.Translation;
+
+        if (translation is { Status: TranslationStatus.Done, Text: { } translated })
+        {
+            // The translated body carries no links, emotes or game colors — it
+            // replaces the segments as one flat run in the translation color.
+            // Everything before it (timestamp, job icon, prefix) is untouched.
+            var body = TranslatedBodySegment(message, translation, translated);
+            var color = TranslationService.TranslationColor(plugin.Configuration);
+            if (DrawTranslatedBody(body, color) && plugin.Configuration.ShowTranslationTooltip)
+                pendingTranslationTooltip = (message, translation);
+        }
+        else if (message.Segments.Count > 0)
         {
             foreach (var segment in message.Segments)
             {
@@ -2256,6 +2502,99 @@ public class MainWindow : Window, IDisposable
 
         if (repeats > 1)
             DrawSegmentText($" ×{repeats}", ChatColors.Timestamp, null);
+    }
+
+    // Hovered translated body waiting for its tooltip, deferred to the end of
+    // the log: submitting a tooltip window overwrites ImGui's last-item rect,
+    // which the row still needs for the ×N counter and the mention highlight.
+    // At most one row is hovered, so a single slot is enough.
+    private (Message Message, TranslationState Translation)? pendingTranslationTooltip;
+
+    // Render cache for translated bodies. It lives here rather than on Message
+    // (which owns the caches derived from its own immutable fields): the entry
+    // is keyed on the TranslationState instance so a re-translation rebuilds
+    // it, and the weak table drops it when the message is evicted.
+    private readonly ConditionalWeakTable<Message, TranslatedBody> translatedBodies = new();
+
+    private sealed class TranslatedBody
+    {
+        public TranslationState? Source;
+        public MessageSegment? Segment;
+    }
+
+    /// <summary>
+    /// The translated body as a segment, so it word-wraps through the same
+    /// token machinery as normal text. Built once per translation — this runs
+    /// for every visible translated row, every frame.
+    /// </summary>
+    private MessageSegment TranslatedBodySegment(Message message, TranslationState translation, string text)
+    {
+        var cache = translatedBodies.GetOrCreateValue(message);
+
+        // Identity, not record equality: `!=` on a record is a value compare
+        // that would run for every visible translated row every frame, and a
+        // fresh state instance is exactly what "the translation changed" means.
+        if (!ReferenceEquals(cache.Source, translation))
+        {
+            cache.Source = translation;
+            cache.Segment = new MessageSegment(text, null, null);
+        }
+
+        return cache.Segment!;
+    }
+
+    /// <summary>
+    /// Draws a translated body as one flat run, reporting whether any of its
+    /// word tokens is hovered. Hover is accumulated here instead of inside
+    /// DrawToken, which owns the link hover handling normal segments depend on:
+    /// the body is many ImGui items but must show a single tooltip.
+    /// </summary>
+    private bool DrawTranslatedBody(MessageSegment segment, Vector4 color)
+    {
+        using var c = ImRaii.PushColor(ImGuiCol.Text, color);
+
+        var hovered = false;
+        var forceNewLine = false;
+        foreach (var token in segment.Tokens ??= BuildTokens(segment.Text))
+        {
+            if (token == "\n")
+            {
+                forceNewLine = true;
+                continue;
+            }
+
+            // No link, so DrawToken returns before its own hover test — this
+            // stays the only IsItemHovered call for the token.
+            DrawToken(token, null, forceNewLine);
+            hovered |= ImGui.IsItemHovered();
+            forceNewLine = false;
+        }
+
+        return hovered;
+    }
+
+    /// <summary>
+    /// Hover tooltip for a translated body: the original line under a dim
+    /// "JA → Japanese" header, or just "original" when either end is unknown.
+    /// </summary>
+    private static void DrawTranslationTooltip(Message message, TranslationState translation)
+    {
+        using var tooltip = ImRaii.Tooltip();
+
+        var header = translation.DetectedSource is { Length: > 0 } source
+                     && translation.TargetLanguage is { Length: > 0 } target
+            ? $"{source} → {Languages.Label(target)}"
+            : "original";
+
+        using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+        {
+            ImGui.TextUnformatted(header);
+        }
+
+        // Chat lines run long; unwrapped, the tooltip stretches off-screen.
+        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 400);
+        ImGui.TextUnformatted(message.Text);
+        ImGui.PopTextWrapPos();
     }
 
     /// <summary>
@@ -2431,6 +2770,7 @@ public class MainWindow : Window, IDisposable
                 if (clicked || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
                 {
                     contextItem = item;
+                    linkClaimedRightClick |= ImGui.IsMouseClicked(ImGuiMouseButton.Right);
                     ImGui.OpenPopup(itemContextPopupId);
                 }
 
@@ -2494,6 +2834,7 @@ public class MainWindow : Window, IDisposable
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
                 {
                     contextPartner = player.Partner;
+                    linkClaimedRightClick = true;
                     ImGui.OpenPopup(logContextPopupId);
                 }
 

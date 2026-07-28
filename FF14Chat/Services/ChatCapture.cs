@@ -4,6 +4,7 @@ using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using FF14Chat.Model;
+using FF14Chat.Services.Translation;
 
 namespace FF14Chat.Services;
 
@@ -14,6 +15,7 @@ public sealed class ChatCapture : IDisposable
     private readonly TabManager tabs;
     private readonly MessageDatabase database;
     private readonly PresenceTracker presence;
+    private readonly TranslationService translation;
 
     private XivChatType lastType;
     private string lastSender = string.Empty;
@@ -29,12 +31,18 @@ public sealed class ChatCapture : IDisposable
     // Diagnostic window: log every event for the first minute after load.
     private readonly DateTime loadedAt = DateTime.Now;
 
-    public ChatCapture(MessageStore store, TabManager tabs, MessageDatabase database, PresenceTracker presence)
+    public ChatCapture(
+        MessageStore store,
+        TabManager tabs,
+        MessageDatabase database,
+        PresenceTracker presence,
+        TranslationService translation)
     {
         this.store = store;
         this.tabs = tabs;
         this.database = database;
         this.presence = presence;
+        this.translation = translation;
         Plugin.ChatGui.ChatMessage += OnChatMessage;
     }
 
@@ -205,5 +213,9 @@ public sealed class ChatCapture : IDisposable
         store.Add(message);
         tabs.Route(message);
         database.Enqueue(message);
+
+        // After routing: the line renders immediately and the translation
+        // fills in underneath it whenever the provider answers.
+        translation.RequestIncoming(message);
     }
 }

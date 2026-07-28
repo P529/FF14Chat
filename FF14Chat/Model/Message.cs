@@ -33,4 +33,12 @@ public sealed class Message
     internal bool HasPrefixCache;
     internal IReadOnlyList<MessageSegment>? PrefixCache;
     internal MessageSegment? FallbackCache;
+
+    /// <summary>
+    /// Set from a background thread once translation resolves; read on the draw
+    /// thread. Null until requested. Volatile because it is a lone reference
+    /// store with no lock on either side — without it the draw thread is free
+    /// to keep reading a cached null forever and the line never updates.
+    /// </summary>
+    internal volatile TranslationState? Translation;
 }

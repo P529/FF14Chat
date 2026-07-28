@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.2.3.3</Version>
+    <Version>0.3.0.0</Version>
     <!-- Keep the packaged zip free of non-Windows sqlite natives, without
          moving the output path Dalamud's dev plugin registration points at. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="GTranslate" Version="2.3.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
     <!-- Override the vulnerable transitive native sqlite lib (NU1903). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
@@ -28,8 +29,6 @@
   <!-- Dalamud's plugin load context probes the plugin directory for native
        libraries, so the sqlite native dll must sit next to the plugin dll. -->
   <Target Name="CopySqliteNative" AfterTargets="Build">
-    <Copy SourceFiles="$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll"
-          DestinationFolder="$(OutputPath)"
-          Condition="Exists('$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll')" />
+    <Copy SourceFiles="$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll" DestinationFolder="$(OutputPath)" Condition="Exists('$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll')" />
   </Target>
 </Project>

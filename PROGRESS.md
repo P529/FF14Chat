@@ -27,6 +27,27 @@ state of what actually works.
 - FFXIV-native theming (4 themes), game font, item/map/player links with
   custom item tooltip cards.
 
+### Added 2026-07-28 — translation (v0.3.0)
+- **Translate tab in settings.** Off by default; first enable shows a
+  confirmation naming what leaves the machine (tells included).
+- **Backends**: Google/Bing/Yandex via GTranslate (no account, the default),
+  DeepL with an API key, Anthropic, or any OpenAI-compatible endpoint
+  (Ollama/LM Studio/OpenRouter). Optional automatic fallback to the free
+  backends when the chosen one fails, is out of quota, or is rate limiting.
+- **Incoming**: translated text replaces the body in its own color; hovering
+  shows the original under a "JA → English" header. Only lines a player typed
+  are eligible (system/NPC text is game-written and already localized), and a
+  channel grid narrows that further. Requests batch (250 ms), dedupe identical
+  lines, and cache 2000 results.
+- **Outgoing**: typed input is translated before sending, asynchronously —
+  the input stays usable, and a failure hands the draft back rather than
+  sending the wrong thing. Text starting with `/` is never translated.
+- **On demand**: right-click any message → Translate / Show original / Copy
+  Text, ignoring every filter, so translation can stay off day to day.
+- **Rate limits**: a 429 is never retried inline. It starts a cooldown —
+  `Retry-After` when given, else 1 min doubling per repeat strike, capped at
+  15 min — during which the provider is left alone and the fallback covers.
+
 ### Added 2026-07-10/11
 - **Tell presence dots** — colored dot on each tell tab: green online, red
   AFK, gray offline (friends only — the friend list is the only source that

@@ -8,7 +8,7 @@ using Dalamud.Interface.Windowing;
 
 namespace FF14Chat.Ui;
 
-public class SettingsWindow : Window, IDisposable
+public partial class SettingsWindow : Window, IDisposable
 {
     private static readonly int[] FontSizes = [10, 12, 14, 18];
 
@@ -132,6 +132,12 @@ public class SettingsWindow : Window, IDisposable
         {
             if (tab.Success)
                 DrawHistoryTab(config);
+        }
+
+        using (var tab = ImRaii.TabItem("Translate"))
+        {
+            if (tab.Success)
+                DrawTranslateTab(config);
         }
     }
 
