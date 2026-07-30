@@ -25,7 +25,7 @@ namespace FF14Chat.Ui;
 /// <summary>
 /// The chat window itself: lifecycle, the framework-update poll, the tab bar
 /// and its scroll strip, the log, the context menus and the window chrome.
-/// The rest lives beside it - MainWindow.Hooks.cs for the native detours,
+/// The rest lives beside it — MainWindow.Hooks.cs for the native detours,
 /// MainWindow.Input.cs for the input row and completion, MainWindow.Render.cs
 /// for turning messages into pixels.
 /// </summary>
