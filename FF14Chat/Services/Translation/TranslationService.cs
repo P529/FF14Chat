@@ -78,6 +78,9 @@ public sealed partial class TranslationService : IDisposable
     /// <summary>Set before anything is torn down; batches check it instead of the disposed tokens.</summary>
     private volatile bool disposed;
 
+    /// <summary>Source of the per-message request stamps; see Message.TranslationRequest.</summary>
+    private long requestSeq;
+
     public TranslationService(Configuration config)
     {
         this.config = config;
@@ -136,12 +139,7 @@ public sealed partial class TranslationService : IDisposable
             return;
         }
 
-        message.Translation = new TranslationState
-        {
-            Status = TranslationStatus.Pending,
-            TargetLanguage = target,
-        };
-        queue.Writer.TryWrite(message);
+        Enqueue(message, target);
     }
 
     /// <summary>
@@ -167,6 +165,17 @@ public sealed partial class TranslationService : IDisposable
             return;
         }
 
+        Enqueue(message, target);
+    }
+
+    /// <summary>
+    /// Marks the line pending and queues it, stamping it as the newest request
+    /// for that message so an older in-flight batch knows to stand down.
+    /// </summary>
+    private void Enqueue(Message message, string target)
+    {
+        var stamp = Interlocked.Increment(ref requestSeq);
+        Interlocked.Exchange(ref message.TranslationRequest, stamp);
         message.Translation = new TranslationState
         {
             Status = TranslationStatus.Pending,
@@ -175,8 +184,16 @@ public sealed partial class TranslationService : IDisposable
         queue.Writer.TryWrite(message);
     }
 
-    /// <summary>Drops a translation so the line renders as it arrived.</summary>
-    public static void ShowOriginal(Message message) => message.Translation = null;
+    /// <summary>
+    /// Drops a translation so the line renders as it arrived. Retiring the
+    /// request stamp disowns any batch still out for this line, which would
+    /// otherwise resolve a moment later and undo the user's choice.
+    /// </summary>
+    public static void ShowOriginal(Message message)
+    {
+        Interlocked.Exchange(ref message.TranslationRequest, 0);
+        message.Translation = null;
+    }
 
     /// <summary>
     /// Translate outgoing input into the configured outgoing language. Bypasses
@@ -406,6 +423,11 @@ public sealed partial class TranslationService : IDisposable
             : message.SenderPlayer.StartsWith(localName + "@", StringComparison.Ordinal);
     }
 
+    /// <summary>An absolute http(s) URL is the only thing the endpoint builder can extend.</summary>
+    private static bool UsableBaseUrl(string baseUrl) =>
+        Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
     private ITranslationProvider? Provider()
     {
         lock (providerGate)
@@ -416,6 +438,17 @@ public sealed partial class TranslationService : IDisposable
             // Unknown ids (a removed backend in an older config, or one a newer
             // build wrote) land on the keyless default rather than nothing.
             var kind = (TranslationProviderKind)config.TranslationProvider;
+
+            // Checked here rather than left to HttpClient: an unusable base URL
+            // becomes a relative request there, and the InvalidOperationException
+            // it raises reads like a plumbing fault instead of a setting the
+            // user cleared and can fix.
+            if (kind == TranslationProviderKind.OpenAiCompatible && !UsableBaseUrl(config.LlmBaseUrl))
+            {
+                lastError = "Set a Base URL for the OpenAI-compatible provider, e.g. https://api.openai.com/v1";
+                return null;
+            }
+
             provider = kind switch
             {
                 TranslationProviderKind.DeepL when config.DeepLApiKey.Length > 0
@@ -506,9 +539,28 @@ public sealed partial class TranslationService : IDisposable
             Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Writes a resolved state back to a line, unless a newer request for that
+    /// line was made while this batch was out. Dropping the stale result is
+    /// right even when the newer one hasn't landed yet: that request set the
+    /// line pending again and will resolve it.
+    /// </summary>
+    private static void Apply(Message message, long stamp, TranslationState state)
+    {
+        if (Volatile.Read(ref message.TranslationRequest) == stamp)
+            message.Translation = state;
+    }
+
     private async Task TranslateBatchAsync(ITranslationProvider active, Message[] batch)
     {
         var target = config.TargetLanguage;
+
+        // Captured before the first await: from here on the message may be
+        // re-requested at any moment, and this batch owns only what it saw.
+        var stamps = new long[batch.Length];
+        for (var i = 0; i < batch.Length; i++)
+            stamps[i] = Volatile.Read(ref batch[i].TranslationRequest);
+
         try
         {
             var targetBase = Languages.BaseCode(target);
@@ -516,23 +568,23 @@ public sealed partial class TranslationService : IDisposable
             // Identical lines (spam, duplicated shouts, repeated party calls)
             // cost one API item and fan the single result back out.
             var texts = new List<string>();
-            var groups = new Dictionary<string, List<Message>>(StringComparer.Ordinal);
-            foreach (var message in batch)
+            var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            for (var i = 0; i < batch.Length; i++)
             {
-                if (!groups.TryGetValue(message.Text, out var group))
+                if (!groups.TryGetValue(batch[i].Text, out var group))
                 {
-                    groups[message.Text] = group = [];
-                    texts.Add(message.Text);
+                    groups[batch[i].Text] = group = [];
+                    texts.Add(batch[i].Text);
                 }
 
-                group.Add(message);
+                group.Add(i);
             }
 
             var results = await SendAsync(active, texts, target, shutdown.Token).ConfigureAwait(false);
             if (results == null)
             {
-                foreach (var message in batch)
-                    message.Translation = Failed(target);
+                for (var i = 0; i < batch.Length; i++)
+                    Apply(batch[i], stamps[i], Failed(target));
                 return;
             }
 
@@ -561,8 +613,8 @@ public sealed partial class TranslationService : IDisposable
                     Store(CacheKey(target, texts[i]), state);
                 }
 
-                foreach (var message in groups[texts[i]])
-                    message.Translation = state;
+                foreach (var index in groups[texts[i]])
+                    Apply(batch[index], stamps[index], state);
             }
         }
         catch (OperationCanceledException)
@@ -576,8 +628,8 @@ public sealed partial class TranslationService : IDisposable
             // state), so anything that throws before this line — including a
             // disposed token during unload — would leave those lines spinning
             // forever.
-            foreach (var message in batch)
-                message.Translation = Failed(target);
+            for (var i = 0; i < batch.Length; i++)
+                Apply(batch[i], stamps[i], Failed(target));
 
             if (!disposed && !shutdown.IsCancellationRequested)
                 Plugin.Log.Error(e, "Translation batch failed");

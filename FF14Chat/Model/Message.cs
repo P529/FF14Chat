@@ -41,4 +41,13 @@ public sealed class Message
     /// to keep reading a cached null forever and the line never updates.
     /// </summary>
     internal volatile TranslationState? Translation;
+
+    /// <summary>
+    /// Identifies the most recent translation request made for this line. A
+    /// batch captures it when it starts and writes its result back only if it
+    /// still matches, so a slow request (retries and backoff can run for a
+    /// minute) cannot land on top of a newer one for a different target
+    /// language. Written with Interlocked, read with Volatile.
+    /// </summary>
+    internal long TranslationRequest;
 }
