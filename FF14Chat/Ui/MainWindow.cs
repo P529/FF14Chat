@@ -27,7 +27,7 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace FF14Chat.Ui;
 
-public class MainWindow : Window, IDisposable
+public partial class MainWindow : Window, IDisposable
 {
     // Rendering is not virtualized yet, so cap how much we lay out per frame.
     private const int MaxRenderedMessages = 500;
@@ -451,11 +451,19 @@ public class MainWindow : Window, IDisposable
 
     public override void PreDraw()
     {
+        FFTheme.Configure(plugin.Configuration);
+
         Flags = plugin.Configuration.LockWindow
             ? BaseFlags | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize
             : BaseFlags;
 
-        FFTheme.Configure(plugin.Configuration);
+        // Game Default draws its own corner grip. ImGui's native one is claimed
+        // during Begin, so it wins the click over anything drawn later — which
+        // in that layout is the strip's Close/Lock buttons, sitting in the same
+        // bottom-right corner. Dropping it hands the corner back to them.
+        if (FFTheme.GameLayout)
+            Flags |= ImGuiWindowFlags.NoResize;
+
         themeColors = FFTheme.PushColors();
         themeStyles = FFTheme.PushStyles();
         if (gameFont.Available)
@@ -647,6 +655,15 @@ public class MainWindow : Window, IDisposable
         tabContextPopupId = ImGui.GetID(PlayerContextPopup);
 
         FFTheme.DrawWindowBackground();
+
+        // Game Default is a different layout, not just a palette: no header,
+        // input above a hand-drawn tab strip. See MainWindow.Vanilla.cs.
+        if (FFTheme.GameLayout)
+        {
+            DrawGameLayout();
+            return;
+        }
+
         DrawHeader();
 
         // Submitted before the tab bar so the arrows win clicks over tabs
@@ -696,16 +713,7 @@ public class MainWindow : Window, IDisposable
         imguiIdToTabId.Clear();
         var snapshot = tabs.Snapshot();
 
-        // FC-only tabs are pointless without a free company. Read membership
-        // from the FC info proxy (see ReadInFreeCompany); a positive result
-        // latches until logout so the tab can't flicker away on transient
-        // unreadable states, and a loading (null) player counts as "in one".
-        if (!Plugin.ClientState.IsLoggedIn)
-            fcSeen = false;
-        else if (!fcSeen && ReadInFreeCompany())
-            fcSeen = true;
-
-        var inFreeCompany = fcSeen || Plugin.ObjectTable.LocalPlayer == null;
+        var inFreeCompany = UpdateFreeCompanyLatch();
 
         foreach (var tab in snapshot)
         {
@@ -805,6 +813,23 @@ public class MainWindow : Window, IDisposable
 
         return Plugin.ObjectTable.LocalPlayer is { } player
                && player.CompanyTag.TextValue.Length > 0;
+    }
+
+    /// <summary>
+    /// Whether FC-only tabs should be shown; they are pointless without a free
+    /// company. Membership comes from the FC info proxy (see
+    /// <see cref="ReadInFreeCompany"/>); a positive result latches until logout
+    /// so the tab can't flicker away on transient unreadable states, and a
+    /// loading (null) player counts as "in one".
+    /// </summary>
+    private bool UpdateFreeCompanyLatch()
+    {
+        if (!Plugin.ClientState.IsLoggedIn)
+            fcSeen = false;
+        else if (!fcSeen && ReadInFreeCompany())
+            fcSeen = true;
+
+        return fcSeen || Plugin.ObjectTable.LocalPlayer == null;
     }
 
     /// <summary>True when every channel of the tab is Free Company chat.</summary>
@@ -1245,14 +1270,7 @@ public class MainWindow : Window, IDisposable
     /// </summary>
     private void DrawPresenceDot(TabState tab)
     {
-        var status = plugin.Presence.StatusFor(tab.TellPartner!);
-        var color = status switch
-        {
-            PresenceStatus.Online => new Vector4(0.35f, 0.85f, 0.40f, 1f),
-            PresenceStatus.Afk => new Vector4(0.90f, 0.30f, 0.25f, 1f),
-            PresenceStatus.Offline => new Vector4(0.55f, 0.55f, 0.55f, 0.90f),
-            _ => new Vector4(0.35f, 0.55f, 0.95f, 0.90f),
-        };
+        var color = PresenceColor(plugin.Presence.StatusFor(tab.TellPartner!));
 
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
@@ -1260,6 +1278,17 @@ public class MainWindow : Window, IDisposable
         var center = new Vector2(min.X + radius + 5f, (min.Y + max.Y) / 2f + 1f);
         ImGui.GetWindowDrawList().AddCircleFilled(center, radius, ImGui.GetColorU32(color), 12);
     }
+
+    /// <summary>Dot color for a tell partner's online status; shared by both tab strips.</summary>
+    private static Vector4 PresenceColor(PresenceStatus status) => status switch
+    {
+        PresenceStatus.Online => new Vector4(0.35f, 0.85f, 0.40f, 1f),
+        PresenceStatus.Afk => new Vector4(0.90f, 0.30f, 0.25f, 1f),
+        PresenceStatus.Offline => new Vector4(0.55f, 0.55f, 0.55f, 0.90f),
+
+        // Not a friend, not in party, not nearby — no data.
+        _ => new Vector4(0.35f, 0.55f, 0.95f, 0.90f),
+    };
 
     /// <summary>
     /// Draws the unread markers over the tab header (the last ImGui item):
@@ -1371,7 +1400,10 @@ public class MainWindow : Window, IDisposable
         if (messages.Length == 0)
         {
             using var dim = ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp);
-            ImGui.TextWrapped("No messages yet — chat will appear here as it happens.");
+            const string empty = "No messages yet — chat will appear here as it happens.";
+            if (FFTheme.GameLayout)
+                VanillaChrome.ShadowAtCursor(empty);
+            ImGui.TextWrapped(empty);
             return;
         }
 
@@ -1513,6 +1545,8 @@ public class MainWindow : Window, IDisposable
         using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim))
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (width - textSize.X) / 2f);
+            if (FFTheme.GameLayout)
+                VanillaChrome.ShadowAtCursor(label);
             ImGui.TextUnformatted(label);
         }
 
@@ -1799,15 +1833,26 @@ public class MainWindow : Window, IDisposable
         // progress indicator: the field stays fully usable, and it is empty
         // right after a submit — exactly when a hint is visible.
         var translating = pendingSend is { IsCompleted: false } && pendingSendTabId == tab.Id;
+
+        // Game Default puts the destination on the prompt line above the bar
+        // (as the game does), so the field itself stays empty there.
         var hint = translating
             ? "Translating…"
-            : tab.IsTell
-                ? $"Message {tab.Title}…"
-                : destination is { Label.Length: > 0 } dest
-                    ? $"{dest.Label}…"
-                    : "Chat or /command…";
+            : FFTheme.GameLayout
+                ? string.Empty
+                : tab.IsTell
+                    ? $"Message {tab.Title}…"
+                    : destination is { Label.Length: > 0 } dest
+                        ? $"{dest.Label}…"
+                        : "Chat or /command…";
         var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
+
+        // Game Default draws the field's frame itself (square where it meets
+        // the chat-mode button, one rounded cap on the right), so the widget
+        // gets a transparent frame over it. The rect is known before the widget
+        // is submitted: SetNextItemWidth(-1) runs it to the window edge.
+        using var vanillaFrame = PushGameInputFrame(inputPos, destination?.Color);
 
         // InputText can't style a substring. With a link placeholder in the
         // draft, the widget draws its text transparent and the visible text
@@ -2419,7 +2464,11 @@ public class MainWindow : Window, IDisposable
         }
 
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+        {
+            if (FFTheme.GameLayout)
+                VanillaChrome.ShadowAtCursor(message.StampCache);
             ImGui.TextUnformatted(message.StampCache);
+        }
 
         // Masked: flagged variants (source bits in the high byte) must color
         // and prefix like their base kind — Route already matches them into
@@ -2739,6 +2788,12 @@ public class MainWindow : Window, IDisposable
     {
         if (!forceNewLine)
             ContinueLineIfFits(ImGui.CalcTextSize(token).X);
+
+        // The game's log has no panel behind it, so every glyph carries a hard
+        // drop shadow. Queued into the draw list first; ImGui paints the real
+        // text over it and layout is untouched.
+        if (FFTheme.GameLayout)
+            VanillaChrome.ShadowAtCursor(token);
 
         ImGui.TextUnformatted(token);
 

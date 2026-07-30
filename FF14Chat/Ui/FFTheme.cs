@@ -7,7 +7,9 @@ namespace FF14Chat.Ui;
 /// <summary>
 /// Window theming. Muted/Rich Gold sample the vanilla FFXIV UI; Classic Blue
 /// is the white-on-blue menu of the 2D-era games; FF7 Remake is the dark
-/// ink-blue panel with bright cyan accents and squared corners.
+/// ink-blue panel with bright cyan accents and squared corners; Game Default
+/// reproduces the game's own chat log — a flat translucent charcoal panel with
+/// no gold trim, no sheen and cool grey tabs.
 /// </summary>
 public static class FFTheme
 {
@@ -21,11 +23,26 @@ public static class FFTheme
         opacity = System.Math.Clamp(config.BgOpacity, 0.3f, 1f);
     }
 
+    /// <summary>
+    /// True for the theme that mimics the game's own chat log. It changes the
+    /// layout, not just the palette: tabs move below the input, the window has
+    /// no panel of its own and the chrome is hand-drawn (see
+    /// <see cref="VanillaChrome"/> and MainWindow.Vanilla.cs).
+    /// </summary>
+    public static bool GameLayout => theme == ChatTheme.GameDefault;
+
+    /// <summary>Opacity applied to the hand-drawn chrome, which is near-opaque in game.</summary>
+    public static float ChromeAlpha => 0.60f + 0.40f * opacity;
+
+    /// <summary>Panel fill behind the log; only shown on hover in Game Default.</summary>
+    public static Vector4 LogBackdrop => BgBottom;
+
     /// <summary>Primary accent (borders, separators, scrollbars).</summary>
     public static Vector4 Gold => theme switch
     {
         ChatTheme.ClassicBlue => new Vector4(0.860f, 0.880f, 0.960f, 1f),
         ChatTheme.Ff7Remake => new Vector4(0.310f, 0.780f, 0.940f, 1f),
+        ChatTheme.GameDefault => new Vector4(0.655f, 0.685f, 0.750f, 1f),   // #A7AFBF
         ChatTheme.RichGold => new Vector4(0.784f, 0.667f, 0.431f, 1f),   // #C8AA6E
         _ => new Vector4(0.640f, 0.600f, 0.505f, 1f),                    // #A3997F
     };
@@ -35,6 +52,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(1f, 1f, 1f, 1f),
         ChatTheme.Ff7Remake => new Vector4(0.650f, 0.900f, 1f, 1f),
+        ChatTheme.GameDefault => new Vector4(0.925f, 0.940f, 0.965f, 1f), // #ECF0F6
         ChatTheme.RichGold => new Vector4(0.910f, 0.835f, 0.628f, 1f),   // #E8D5A0
         _ => new Vector4(0.800f, 0.770f, 0.680f, 1f),                    // #CCC4AD
     };
@@ -43,6 +61,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.965f, 0.965f, 0.985f, 1f),
         ChatTheme.Ff7Remake => new Vector4(0.940f, 0.960f, 0.980f, 1f),
+        ChatTheme.GameDefault => new Vector4(0.950f, 0.955f, 0.965f, 1f),
         _ => new Vector4(0.900f, 0.885f, 0.835f, 1f),
     };
 
@@ -50,6 +69,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.700f, 0.730f, 0.870f, 1f),
         ChatTheme.Ff7Remake => new Vector4(0.550f, 0.630f, 0.720f, 1f),
+        ChatTheme.GameDefault => new Vector4(0.565f, 0.590f, 0.645f, 1f),
         _ => new Vector4(0.630f, 0.615f, 0.560f, 1f),
     };
 
@@ -57,6 +77,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.010f, 0.020f, 0.310f, opacity),
         ChatTheme.Ff7Remake => new Vector4(0.028f, 0.062f, 0.105f, opacity),
+        ChatTheme.GameDefault => new Vector4(0.043f, 0.047f, 0.059f, opacity),
         _ => new Vector4(0.078f, 0.078f, 0.098f, opacity),
     };
 
@@ -64,20 +85,32 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.180f, 0.260f, 0.760f, 0.50f * opacity),
         ChatTheme.Ff7Remake => new Vector4(0.100f, 0.220f, 0.360f, 0.45f * opacity),
+        ChatTheme.GameDefault => new Vector4(0, 0, 0, 0),                // flat panel, no gloss
         ChatTheme.RichGold => new Vector4(0.216f, 0.216f, 0.271f, 0.55f * opacity),
         _ => new Vector4(0.216f, 0.216f, 0.271f, 0.30f * opacity),
     };
 
     /// <summary>Corner rounding; FF7 Remake panels are squared.</summary>
-    public static float Rounding => theme == ChatTheme.Ff7Remake ? 2f : 9f;
+    public static float Rounding => theme switch
+    {
+        ChatTheme.Ff7Remake => 2f,
+        ChatTheme.GameDefault => 5f,
+        _ => 9f,
+    };
 
-    private static float SmallRounding => theme == ChatTheme.Ff7Remake ? 1f : 4f;
+    private static float SmallRounding => theme switch
+    {
+        ChatTheme.Ff7Remake => 1f,
+        ChatTheme.GameDefault => 3f,
+        _ => 4f,
+    };
 
     private static float BorderAlpha => theme switch
     {
         ChatTheme.ClassicBlue => 0.90f,
         ChatTheme.Ff7Remake => 0.60f,
         ChatTheme.RichGold => 0.55f,
+        ChatTheme.GameDefault => 0.18f,  // barely-there frame, like the game's
         _ => 0.40f,
     };
 
@@ -87,6 +120,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.005f, 0.010f, 0.220f, 0.85f),
         ChatTheme.Ff7Remake => new Vector4(0.045f, 0.095f, 0.150f, 0.85f),
+        ChatTheme.GameDefault => new Vector4(0.020f, 0.022f, 0.030f, 0.80f),
         ChatTheme.RichGold => new Vector4(0.055f, 0.055f, 0.075f, 0.90f),
         _ => new Vector4(0.055f, 0.055f, 0.075f, 0.70f),
     });
@@ -95,6 +129,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.040f, 0.070f, 0.330f, 0.92f),
         ChatTheme.Ff7Remake => new Vector4(0.075f, 0.150f, 0.230f, 0.92f),
+        ChatTheme.GameDefault => new Vector4(0.105f, 0.115f, 0.140f, 0.92f),
         ChatTheme.RichGold => new Vector4(0.100f, 0.100f, 0.130f, 0.95f),
         _ => new Vector4(0.100f, 0.100f, 0.130f, 0.80f),
     };
@@ -103,6 +138,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.070f, 0.110f, 0.400f, 1f),
         ChatTheme.Ff7Remake => new Vector4(0.095f, 0.190f, 0.290f, 1f),
+        ChatTheme.GameDefault => new Vector4(0.145f, 0.158f, 0.190f, 1f),
         ChatTheme.RichGold => new Vector4(0.120f, 0.120f, 0.155f, 1f),
         _ => new Vector4(0.120f, 0.120f, 0.155f, 0.90f),
     };
@@ -116,6 +152,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.030f, 0.060f, 0.340f, 0.70f),
         ChatTheme.Ff7Remake => new Vector4(0.060f, 0.130f, 0.200f, 0.65f),
+        ChatTheme.GameDefault => new Vector4(0.082f, 0.090f, 0.110f, 0.62f),
         ChatTheme.RichGold => new Vector4(0.130f, 0.130f, 0.165f, 0.85f),
         _ => new Vector4(0.130f, 0.130f, 0.165f, 0.55f),
     });
@@ -124,6 +161,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.110f, 0.170f, 0.520f, 0.95f),
         ChatTheme.Ff7Remake => new Vector4(0.120f, 0.290f, 0.430f, 0.95f),
+        ChatTheme.GameDefault => new Vector4(0.180f, 0.196f, 0.235f, 0.95f),
         ChatTheme.RichGold => new Vector4(0.230f, 0.225f, 0.270f, 1f),
         _ => new Vector4(0.230f, 0.225f, 0.270f, 0.85f),
     });
@@ -132,6 +170,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.150f, 0.220f, 0.580f, 0.90f),
         ChatTheme.Ff7Remake => new Vector4(0.145f, 0.350f, 0.520f, 0.90f),
+        ChatTheme.GameDefault => new Vector4(0.245f, 0.265f, 0.310f, 0.92f),
         ChatTheme.RichGold => new Vector4(0.265f, 0.255f, 0.300f, 0.90f),
         _ => new Vector4(0.265f, 0.255f, 0.300f, 0.85f),
     });
@@ -140,6 +179,7 @@ public static class FFTheme
     {
         ChatTheme.ClassicBlue => new Vector4(0.020f, 0.030f, 0.300f, 0.96f),
         ChatTheme.Ff7Remake => new Vector4(0.035f, 0.075f, 0.125f, 0.96f),
+        ChatTheme.GameDefault => new Vector4(0.070f, 0.076f, 0.092f, 0.96f),
         _ => new Vector4(0.100f, 0.100f, 0.128f, 0.96f),
     };
 
@@ -185,13 +225,23 @@ public static class FFTheme
         .Push(ImGuiStyleVar.WindowBorderSize, 0f)
         .Push(ImGuiStyleVar.ChildBorderSize, 0f)
         .Push(ImGuiStyleVar.PopupBorderSize, 1f)
-        .Push(ImGuiStyleVar.FrameBorderSize, 1f)
-        .Push(ImGuiStyleVar.FramePadding, new Vector2(9f, 5f))
-        .Push(ImGuiStyleVar.WindowPadding, new Vector2(12f, 10f));
+        // Game Default draws its own input frame (a capped bar); ImGui's
+        // squared border would cut across it.
+        .Push(ImGuiStyleVar.FrameBorderSize, GameLayout ? 0f : 1f)
+        .Push(ImGuiStyleVar.FramePadding, GameLayout ? new Vector2(7f, 4f) : new Vector2(9f, 5f))
+        // The game's log runs close to its own edges; the other themes keep the
+        // roomier panel padding.
+        .Push(ImGuiStyleVar.WindowPadding, GameLayout ? new Vector2(6f, 4f) : new Vector2(12f, 10f));
 
     /// <summary>Rounded panel fill with a soft top sheen and a double border.</summary>
     public static void DrawWindowBackground()
     {
+        // The game's log has no panel at all — text sits straight on the world
+        // and the drop shadow carries legibility. MainWindow draws its own
+        // hover backdrop there instead (see DrawGameBackdrop).
+        if (GameLayout)
+            return;
+
         var drawList = ImGui.GetWindowDrawList();
         var pos = ImGui.GetWindowPos();
         var size = ImGui.GetWindowSize();
@@ -216,6 +266,16 @@ public static class FFTheme
     public static void DrawFadingSeparator(Vector2 screenPos, float width)
     {
         var drawList = ImGui.GetWindowDrawList();
+
+        // Game Default has no ornamental rules; a flat hairline stands in.
+        if (GameLayout)
+        {
+            drawList.AddRectFilled(
+                screenPos, screenPos + new Vector2(width, 1f),
+                ImGui.GetColorU32(Gold with { W = 0.22f }));
+            return;
+        }
+
         var gold = ImGui.GetColorU32(Gold with { W = 0.75f });
         var mid = screenPos + new Vector2(width * 0.5f, 0);
         var end = screenPos + new Vector2(width, 0);

@@ -12,7 +12,8 @@ public partial class SettingsWindow : Window, IDisposable
 {
     private static readonly int[] FontSizes = [10, 12, 14, 18];
 
-    private static readonly (string Group, (XivChatType Type, string Label)[] Channels)[] ChannelGroups =
+    /// <summary>Shared with the Game Default strip's new-tab popup.</summary>
+    internal static readonly (string Group, (XivChatType Type, string Label)[] Channels)[] ChannelGroups =
     [
         ("Chat",
         [
@@ -174,7 +175,7 @@ public partial class SettingsWindow : Window, IDisposable
 
         var themeIndex = config.Theme;
         ImGui.SetNextItemWidth(160f);
-        if (ImGui.Combo("Theme", ref themeIndex, ["Muted Gold", "Rich Gold", "Classic Blue", "FF7 Remake"], 4))
+        if (ImGui.Combo("Theme", ref themeIndex, ["Muted Gold", "Rich Gold", "Classic Blue", "FF7 Remake", "Game Default"], 5))
         {
             config.Theme = themeIndex;
             config.Save();
@@ -586,13 +587,14 @@ public partial class SettingsWindow : Window, IDisposable
     }
 
     /// <summary>Renames/deletes can orphan the combined-All flag; drop it then.</summary>
-    private static void EnsureCombineStillValid(Configuration config)
+    internal static void EnsureCombineStillValid(Configuration config)
     {
         if (config.CombineGeneralSystem && !config.Tabs.Exists(t => t.Name is "General" or "System"))
             config.CombineGeneralSystem = false;
     }
 
-    private static string UniqueTabName(Configuration config)
+    /// <summary>Shared with the Game Default strip's new-tab popup.</summary>
+    internal static string UniqueTabName(Configuration config)
     {
         var name = "New Tab";
         for (var n = 2; config.Tabs.Exists(t => t.Name == name); n++)

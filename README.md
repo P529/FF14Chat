@@ -13,7 +13,7 @@ A chat replacement for Final Fantasy XIV, built as a [Dalamud](https://github.co
 - **Input, like vanilla but better** — Enter or `/` opens the input (occupied states like cutscenes and NPC dialogue are respected); sending hands control straight back to the game; Tab cycles tabs/channels (Shift+Tab backwards); up/down recalls sent history; drafts are kept per tab.
 - **Autocomplete** — every game command and emote with descriptions from the game's own data, plugin commands included; `/tell ` completes player names from open tells, party, friends, and nearby players.
 - **Persistent history** — SQLite-backed, 30 days of retention, restored on login with correct game timestamps. Tell conversations survive restarts.
-- **Rendering** — per-channel colors, clickable item/map/player links, item tooltip cards, mention highlighting, date separators, game font, four FFXIV-native themes (Muted Gold, Rich Gold, Classic Blue, FF7 Remake) with an opacity slider.
+- **Rendering** — per-channel colors, clickable item/map/player links, item tooltip cards, mention highlighting, date separators, game font, five FFXIV-native themes (Muted Gold, Rich Gold, Classic Blue, FF7 Remake, Game Default) with an opacity slider.
 - **Emotes** — Discord-style shortcodes (`:sob:`, `:joy:`, ~1900 names) render inline as [Twemoji](https://github.com/jdecked/twemoji) images; typing `:` plus two letters autocompletes. Fully bundled, nothing downloaded; others just see the plain text.
 - **Player context menu** — right-click a name in the log or a tell tab: Send Tell, Target, Examine, Adventurer Plate, Invite to Party, Copy Name.
 
