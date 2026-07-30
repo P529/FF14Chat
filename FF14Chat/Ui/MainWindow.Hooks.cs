@@ -1,30 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Numerics;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
-using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.ClientState.Keys;
-using Dalamud.Game.Text;
-using Dalamud.Interface.GameFonts;
-using Dalamud.Interface.ManagedFontAtlas;
-using Dalamud.Interface.Utility.Raii;
-using Dalamud.Interface.Windowing;
+using System;
 using Dalamud.Hooking;
-using FF14Chat.Model;
 using FF14Chat.Services;
-using FF14Chat.Services.Translation;
 using FFXIVClientStructs.FFXIV.Client.System.String;
-using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
-using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using FFXIVClientStructs.FFXIV.Client.UI.Shell;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-
 
 namespace FF14Chat.Ui;
 
@@ -32,9 +12,8 @@ namespace FF14Chat.Ui;
 /// The native hooks the window needs to behave like the game's own chat:
 /// the ChatLog addon's activate event (so the vanilla input never steals
 /// focus from ours), the agent's channel-name change, and the social
-/// window's Send Tell. Detours are the one place here that runs on the
-/// game's terms rather than ImGui's, so they are kept apart from the
-/// drawing code.
+/// window's Send Tell. These run on the game's terms rather than ImGui's,
+/// so they are kept apart from the drawing code.
 /// </summary>
 public partial class MainWindow
 {
@@ -61,7 +40,7 @@ public partial class MainWindow
             if (eventId == 0x31 && value != null && value->UInt is 0x05 or 0x0C)
             {
                 // The third value can carry text the game wants pre-filled
-                // into the input â€” the social window's Send Tell passes the
+                // into the input — the social window's Send Tell passes the
                 // whole "/tell Name@World " command this way instead of
                 // switching the chat mode.
                 var insertValue = value + 2;
@@ -131,7 +110,7 @@ public partial class MainWindow
     /// Runs whenever the game's input channel label changes (this is the
     /// path the social window / friend list uses, which never goes through
     /// SetContextTellTarget). The agent's tell fields are not final yet at
-    /// this point mid-flow â€” the target is written after the label updates â€”
+    /// this point mid-flow — the target is written after the label updates —
     /// so the actual read happens one tick later.
     /// </summary>
     private unsafe nint ChangeChannelNameDetour(AgentChatLog* agent)

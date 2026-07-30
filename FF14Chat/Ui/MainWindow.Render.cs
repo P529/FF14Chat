@@ -1,30 +1,12 @@
-﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.Text;
-using Dalamud.Interface.GameFonts;
-using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Utility.Raii;
-using Dalamud.Interface.Windowing;
-using Dalamud.Hooking;
 using FF14Chat.Model;
 using FF14Chat.Services;
 using FF14Chat.Services.Translation;
-using FFXIVClientStructs.FFXIV.Client.System.String;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
-using FFXIVClientStructs.FFXIV.Client.UI.Info;
-using FFXIVClientStructs.FFXIV.Client.UI.Shell;
-using FFXIVClientStructs.FFXIV.Component.GUI;
-
 
 namespace FF14Chat.Ui;
 
@@ -53,7 +35,7 @@ public partial class MainWindow
             ImGui.TextUnformatted(message.StampCache);
 
         // Masked: flagged variants (source bits in the high byte) must color
-        // and prefix like their base kind â€” Route already matches them into
+        // and prefix like their base kind — Route already matches them into
         // the same tabs.
         var channelColor = ChatColors.For(ChatTypes.Mask(message.Type));
 
@@ -94,7 +76,7 @@ public partial class MainWindow
 
         if (translation is { Status: TranslationStatus.Done, Text: { } translated })
         {
-            // The translated body carries no links, emotes or game colors â€” it
+            // The translated body carries no links, emotes or game colors — it
             // replaces the segments as one flat run in the translation color.
             // Everything before it (timestamp, job icon, prefix) is untouched.
             var body = TranslatedBodySegment(message, translation, translated);
@@ -132,12 +114,12 @@ public partial class MainWindow
         }
 
         if (repeats > 1)
-            DrawSegmentText($" Ã—{repeats}", ChatColors.Timestamp, null);
+            DrawSegmentText($" ×{repeats}", ChatColors.Timestamp, null);
     }
 
     // Hovered translated body waiting for its tooltip, deferred to the end of
     // the log: submitting a tooltip window overwrites ImGui's last-item rect,
-    // which the row still needs for the Ã—N counter and the mention highlight.
+    // which the row still needs for the ×N counter and the mention highlight.
     // At most one row is hovered, so a single slot is enough.
     private (Message Message, TranslationState Translation)? pendingTranslationTooltip;
 
@@ -155,7 +137,7 @@ public partial class MainWindow
 
     /// <summary>
     /// The translated body as a segment, so it word-wraps through the same
-    /// token machinery as normal text. Built once per translation â€” this runs
+    /// token machinery as normal text. Built once per translation — this runs
     /// for every visible translated row, every frame.
     /// </summary>
     private MessageSegment TranslatedBodySegment(Message message, TranslationState translation, string text)
@@ -194,7 +176,7 @@ public partial class MainWindow
                 continue;
             }
 
-            // No link, so DrawToken returns before its own hover test â€” this
+            // No link, so DrawToken returns before its own hover test — this
             // stays the only IsItemHovered call for the token.
             DrawToken(token, null, forceNewLine);
             hovered |= ImGui.IsItemHovered();
@@ -206,7 +188,7 @@ public partial class MainWindow
 
     /// <summary>
     /// Hover tooltip for a translated body: the original line under a dim
-    /// "JA â†’ Japanese" header, or just "original" when either end is unknown.
+    /// "JA → Japanese" header, or just "original" when either end is unknown.
     /// </summary>
     private static void DrawTranslationTooltip(Message message, TranslationState translation)
     {
@@ -214,7 +196,7 @@ public partial class MainWindow
 
         var header = translation.DetectedSource is { Length: > 0 } source
                      && translation.TargetLanguage is { Length: > 0 } target
-            ? $"{source} â†’ {Languages.Label(target)}"
+            ? $"{source} → {Languages.Label(target)}"
             : "original";
 
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
@@ -337,7 +319,7 @@ public partial class MainWindow
 
     /// <summary>
     /// Uncached variant of <see cref="DrawSegment"/> for one-off strings
-    /// (the Ã—N repeat counter).
+    /// (the ×N repeat counter).
     /// </summary>
     private void DrawSegmentText(string text, Vector4 color, SegmentLink? link)
     {
@@ -454,7 +436,7 @@ public partial class MainWindow
                 break;
 
             case SegmentLink.Player player:
-                ImGui.SetTooltip($"{player.Partner}\nClick: open tell tab â€” right-click: menu");
+                ImGui.SetTooltip($"{player.Partner}\nClick: open tell tab — right-click: menu");
                 if (clicked)
                 {
                     var tellTab = tabs.OpenTellTab(player.Partner);
@@ -515,7 +497,7 @@ public partial class MainWindow
             var category = item.ItemUICategory.ValueNullable?.Name.ExtractText() ?? "";
             using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
             {
-                ImGui.TextUnformatted($"{category}  Â·  Item Level {item.LevelItem.RowId}");
+                ImGui.TextUnformatted($"{category}  ·  Item Level {item.LevelItem.RowId}");
                 if (item.LevelEquip > 1)
                     ImGui.TextUnformatted($"Equip Level {item.LevelEquip}");
             }

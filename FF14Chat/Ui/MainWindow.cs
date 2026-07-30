@@ -1,10 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
@@ -14,11 +11,9 @@ using Dalamud.Interface.GameFonts;
 using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
-using Dalamud.Hooking;
 using FF14Chat.Model;
 using FF14Chat.Services;
 using FF14Chat.Services.Translation;
-using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Client.UI.Info;
@@ -30,7 +25,7 @@ namespace FF14Chat.Ui;
 /// <summary>
 /// The chat window itself: lifecycle, the framework-update poll, the tab bar
 /// and its scroll strip, the log, the context menus and the window chrome.
-/// The rest lives beside it — MainWindow.Hooks.cs for the native detours,
+/// The rest lives beside it - MainWindow.Hooks.cs for the native detours,
 /// MainWindow.Input.cs for the input row and completion, MainWindow.Render.cs
 /// for turning messages into pixels.
 /// </summary>
@@ -294,7 +289,7 @@ public partial class MainWindow : Window, IDisposable
 
         // Polled every tick, including through zone changes and logout, where
         // a bad dereference is an access violation rather than a catchable
-        // exception â€” i.e. the game process, not just the plugin.
+        // exception — i.e. the game process, not just the plugin.
         var stage = AtkStage.Instance();
         if (stage == null || stage->RaptureAtkUnitManager == null)
             return false;
@@ -321,7 +316,7 @@ public partial class MainWindow : Window, IDisposable
         // before the game's own input dispatch, so keys the game would
         // consume and clear (Alt+R reply) are still visible and can be
         // swallowed first. While ImGui captures the keyboard the game key
-        // state is suppressed â€” the draw-time ImGui-source poll takes over.
+        // state is suppressed — the draw-time ImGui-source poll takes over.
         if (IsOpen && !ImGui.GetIO().WantTextInput && DrawConditions())
             gameKeybinds.Poll(this, fromImGui: false);
 
@@ -447,11 +442,11 @@ public partial class MainWindow : Window, IDisposable
     }
 
     /// <summary>
-    /// Whether FC-only tabs should be shown. A positive result latches until
-    /// logout so the tab can't flicker away on transient unreadable states,
-    /// and a loading (null) player counts as "in one".
+    /// Whether FC-only tabs should be shown. A positive membership result
+    /// latches until logout so the tab can't flicker away on transient
+    /// unreadable states, and a loading (null) player counts as "in one".
     /// </summary>
-    private bool InFreeCompany()
+    private bool ShouldShowFcTabs()
     {
         // Membership comes from the FC info proxy; see ReadInFreeCompany.
         if (!Plugin.ClientState.IsLoggedIn)
@@ -466,12 +461,12 @@ public partial class MainWindow : Window, IDisposable
     private void DrawTabItems(TabState[] snapshot)
     {
         imguiIdToTabId.Clear();
-        var inFreeCompany = InFreeCompany();
+        var showFcTabs = ShouldShowFcTabs();
 
         foreach (var tab in snapshot)
         {
             // FC-only tabs are pointless without a free company.
-            if (!inFreeCompany && IsFcOnlyTab(tab))
+            if (!showFcTabs && IsFcOnlyTab(tab))
             {
                 // A selection targeting the hidden tab (Alt+F without an FC)
                 // would linger unconsumed and block focus handling.
@@ -563,7 +558,7 @@ public partial class MainWindow : Window, IDisposable
         // scroll arrows so they sit in dead space beside the tabs, not over
         // them (a tab dragged to the edge would otherwise slide under an arrow
         // and hide its close button). Whether it overflows is only known from
-        // the PREVIOUS frame â€” the current bar is created by BeginTabBar below â€”
+        // the PREVIOUS frame — the current bar is created by BeginTabBar below —
         // so on the first overflow frame the gutters are absent and the arrows
         // appear one frame later; a harmless one-frame settle.
         //
@@ -611,7 +606,7 @@ public partial class MainWindow : Window, IDisposable
 
     /// <summary>
     /// Whether the local character is in a free company. Primary source is
-    /// the FC info proxy, fed by the zone-init packet â€” the reason FC chat
+    /// the FC info proxy, fed by the zone-init packet — the reason FC chat
     /// keeps working in instanced duties, where the nameplate CompanyTag
     /// (the fallback) reads empty.
     /// </summary>
@@ -686,7 +681,7 @@ public partial class MainWindow : Window, IDisposable
             var paused = plugin.Translation.Paused;
             using (ImRaii.Disabled(busy || paused))
             {
-                if (ImGui.Selectable(busy ? "Translatingâ€¦" : "Translate"))
+                if (ImGui.Selectable(busy ? "Translating…" : "Translate"))
                     plugin.Translation.RequestManual(message);
             }
 
@@ -780,7 +775,7 @@ public partial class MainWindow : Window, IDisposable
     private bool rightArrowHovered;
 
     // Set from last frame's tabScrollMax; drives this frame's gutter reservation
-    // (decided before BeginTabBar creates the current bar â€” see Draw).
+    // (decided before BeginTabBar creates the current bar — see Draw).
     private bool tabBarOverflowing;
 
     // Reserved gutter width for this frame's arrows. Equals the tab-header
@@ -841,7 +836,7 @@ public partial class MainWindow : Window, IDisposable
         tabBarOverflowing = tabScrollMax > 0f;
 
         // Wheel over the strip scrolls it. IsWindowHovered() (used before) reads
-        // false while the cursor is over a TabItem header â€” a hovered/active item
+        // false while the cursor is over a TabItem header — a hovered/active item
         // suppresses the plain window-hover test, so the wheel never fired there.
         // A pure geometric hit-test against the strip rect avoids that entirely.
         // NoScrollWithMouse (window flag) only stops ImGui from APPLYING wheel to
@@ -1062,7 +1057,7 @@ public partial class MainWindow : Window, IDisposable
     /// <summary>
     /// Draws the partner's online status as a dot at the left edge of the tab
     /// header (the last ImGui item): green online, red AFK, gray offline,
-    /// blue unknown (not a friend, not in party, not nearby â€” no data).
+    /// blue unknown (not a friend, not in party, not nearby — no data).
     /// </summary>
     private void DrawPresenceDot(TabState tab)
     {
@@ -1192,7 +1187,7 @@ public partial class MainWindow : Window, IDisposable
         if (messages.Length == 0)
         {
             using var dim = ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp);
-            ImGui.TextWrapped("No messages yet â€” chat will appear here as it happens.");
+            ImGui.TextWrapped("No messages yet — chat will appear here as it happens.");
             return;
         }
 
@@ -1203,7 +1198,7 @@ public partial class MainWindow : Window, IDisposable
             if (i > first && messages[i - 1].Timestamp.Date != messages[i].Timestamp.Date)
                 DrawDateSeparator(messages[i].Timestamp);
 
-            // Consecutive identical lines render once with a Ã—N counter.
+            // Consecutive identical lines render once with a ×N counter.
             var repeats = 1;
             while (collapse
                    && i + 1 < messages.Length
@@ -1313,7 +1308,7 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
-    /// <summary>Dim centered "â€” Tuesday, July 8 â€”" rule between messages of different days.</summary>
+    /// <summary>Dim centered "— Tuesday, July 8 —" rule between messages of different days.</summary>
     private static void DrawDateSeparator(DateTime date)
     {
         var label = date.ToString("dddd, MMMM d");

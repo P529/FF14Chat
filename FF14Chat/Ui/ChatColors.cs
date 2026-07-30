@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Game.Text;
+using FF14Chat.Services;
 
 namespace FF14Chat.Ui;
 
@@ -19,7 +20,7 @@ public static class ChatColors
     {
         var table = new Dictionary<XivChatType, Vector4>(stored.Count);
         foreach (var (type, rgba) in stored)
-            table[type] = Services.PackedColor.Unpack(rgba);
+            table[type] = PackedColor.Unpack(rgba);
 
         overrides = table;
     }

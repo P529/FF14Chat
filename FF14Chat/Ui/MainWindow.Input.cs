@@ -1,30 +1,16 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.Text;
-using Dalamud.Interface.GameFonts;
-using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Utility.Raii;
-using Dalamud.Interface.Windowing;
-using Dalamud.Hooking;
-using FF14Chat.Model;
 using FF14Chat.Services;
-using FF14Chat.Services.Translation;
 using FFXIVClientStructs.FFXIV.Client.System.String;
-using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
-using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using FFXIVClientStructs.FFXIV.Client.UI.Shell;
-using FFXIVClientStructs.FFXIV.Component.GUI;
-
 
 namespace FF14Chat.Ui;
 
@@ -92,8 +78,8 @@ public partial class MainWindow
             empty->Dtor(true);
         }
 
-        // The channel's dedicated tab (Party, FC, â€¦) is always selected when
-        // one exists. Channels without one (yell, linkshells, â€¦) fall back
+        // The channel's dedicated tab (Party, FC, …) is always selected when
+        // one exists. Channels without one (yell, linkshells, …) fall back
         // to the first tab following the game's active channel (General),
         // but only when the current tab can't send there.
         var commands = ChannelSendCommands(channel);
@@ -214,14 +200,14 @@ public partial class MainWindow
         {
             pendingDraftRestore = null;
 
-            // The tab can be gone by now â€” a tell tab closed while its send
+            // The tab can be gone by now — a tell tab closed while its send
             // was still translating. Writing the draft back would recreate an
             // entry nothing will ever sweep, so only the notice survives.
             if (Array.Exists(tabs.Snapshot(), t => t.Id == restore.TabId))
                 drafts[restore.TabId] = restore.Draft;
 
             // The widget owns its buffer while focused, so an external draft
-            // write is dropped there â€” route it through the callback like the
+            // write is dropped there — route it through the callback like the
             // other programmatic edits. Focus is deliberately not stolen back:
             // the send already handed control to the game and this lands at an
             // arbitrary moment, possibly mid-fight.
@@ -287,18 +273,18 @@ public partial class MainWindow
 
         // While a translated send is in flight the placeholder doubles as its
         // progress indicator: the field stays fully usable, and it is empty
-        // right after a submit â€” exactly when a hint is visible.
+        // right after a submit — exactly when a hint is visible.
         var translating = pendingSend is { IsCompleted: false } && pendingSendTabId == tab.Id;
         var hint = translating
-            ? "Translatingâ€¦"
+            ? "Translating…"
             : tab.IsTell
-                ? $"Message {tab.Title}â€¦"
+                ? $"Message {tab.Title}…"
                 : destination is { Label.Length: > 0 } dest
-                    ? $"{dest.Label}â€¦"
-                    : "Chat or /commandâ€¦";
+                    ? $"{dest.Label}…"
+                    : "Chat or /command…";
         // A history walk belongs to the tab it started in. Every tab has its
         // own buffer, so carrying the position across tabs would splice this
-        // tab's history over another tab's unsent draft without stashing it â€”
+        // tab's history over another tab's unsent draft without stashing it —
         // and walking back down would then restore the wrong tab's stash.
         if (historyTabId != tab.Id)
         {
@@ -471,7 +457,7 @@ public partial class MainWindow
     /// instead of the command list. A tell reaches anyone, so its candidates
     /// come from every source and carry "@World"; /target and /examine act on
     /// an entity in the object table, so they only offer what is actually
-    /// nearby â€” and /target is the game's own command, which takes a bare name
+    /// nearby — and /target is the game's own command, which takes a bare name
     /// (and any targetable object, not just players).
     /// </summary>
     private sealed record NameArgCommand(
@@ -572,7 +558,7 @@ public partial class MainWindow
     /// <summary>
     /// Name suggestions for a partial name argument, as full commands so the
     /// whole-buffer acceptance path works unchanged. Sources in priority order:
-    /// open tell tabs, party, friends, then whatever is nearby â€” the last of
+    /// open tell tabs, party, friends, then whatever is nearby — the last of
     /// which is sorted by distance, since in a crowd the name you want is
     /// nearly always the one standing in front of you.
     /// </summary>
@@ -745,7 +731,7 @@ public partial class MainWindow
             }
 
             // Space accepted a completion (flagged in the char filter earlier
-            // this same frame). Edit the widget's own buffer here â€” an external
+            // this same frame). Edit the widget's own buffer here — an external
             // draft write is ignored while the field is active, so it must go
             // through the callback like the Tab path does.
             if (acceptSuggestionRequested)
@@ -871,7 +857,7 @@ public partial class MainWindow
 
         // The game's /target reads its argument only up to the first space, so
         // it rejects any full player name ("Erik Jeannek" comes back as "Erik
-        // is not a valid target name") â€” which is exactly what the completion
+        // is not a valid target name") — which is exactly what the completion
         // hands it. Resolve against the object table first; an unresolved name
         // still goes to the game, which owns placeholders and partial matches.
         if (ResolveTarget(text))
@@ -903,7 +889,7 @@ public partial class MainWindow
 
         if (!ChatSender.Send(text[0] == '/' ? text : ApplyDestination(tab, text)))
         {
-            // The only false path is the length cap â€” easy to hit in a tell
+            // The only false path is the length cap — easy to hit in a tell
             // tab, where "/tell Name@World " is prepended after the input's
             // own limit. Without feedback, Enter appears to do nothing.
             Notify("Message too long to send.");
@@ -961,12 +947,12 @@ public partial class MainWindow
                 // is outgoing translation switched on with no API key behind
                 // it, and "translation failed" alone gives nothing to act on.
                 failure = plugin.Translation.LastError is { Length: > 0 } reason
-                    ? $"Not sent â€” {reason}"
+                    ? $"Not sent — {reason}"
                     : "Translation failed; message not sent.";
             }
             else
             {
-                // Send re-checks the UTF-8 cap and false means only that â€”
+                // Send re-checks the UTF-8 cap and false means only that —
                 // the check that matters here, because a translation is easily
                 // longer than what was typed and the prefix lands on top of it.
                 failure = ChatSender.Send(ApplyDestination(tab, translated))
