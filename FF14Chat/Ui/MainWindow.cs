@@ -461,6 +461,8 @@ public partial class MainWindow : Window, IDisposable
     private void DrawTabItems(TabState[] snapshot)
     {
         imguiIdToTabId.Clear();
+        unreadOffLeft = false;
+        unreadOffRight = false;
         var showFcTabs = ShouldShowFcTabs();
 
         foreach (var tab in snapshot)
@@ -500,6 +502,7 @@ public partial class MainWindow : Window, IDisposable
         {
             using var fixedItem = ImRaii.TabItem(label, itemFlags);
             imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
+            NoteOffStripUnread(tab);
             if (fixedItem.Success)
                 DrawTab(tab);
             else
@@ -511,6 +514,7 @@ public partial class MainWindow : Window, IDisposable
         using (var item = ImRaii.TabItem(label, ref open, itemFlags))
         {
             imguiIdToTabId[ImGuiP.GetItemID()] = tab.Id;
+            NoteOffStripUnread(tab);
             // The tab header is the last item here, before DrawTab
             // submits the log and input.
             if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
@@ -774,6 +778,16 @@ public partial class MainWindow : Window, IDisposable
     private bool leftArrowHovered;
     private bool rightArrowHovered;
 
+    // An unread tab scrolled out of the strip takes its badge with it, so the
+    // arrow pointing at it carries a dot instead. Recomputed every frame while
+    // the headers are submitted; like the gutters, the strip bounds they are
+    // tested against are last frame's, which costs at most a frame of lag.
+    private bool unreadOffLeft;
+    private bool unreadOffRight;
+
+    /// <summary>Badge bubble and the off-strip dot that stands in for it.</summary>
+    private static readonly Vector4 UnreadColor = new(0.80f, 0.20f, 0.20f, 1f);
+
     // Set from last frame's tabScrollMax; drives this frame's gutter reservation
     // (decided before BeginTabBar creates the current bar — see Draw).
     private bool tabBarOverflowing;
@@ -862,11 +876,11 @@ public partial class MainWindow : Window, IDisposable
         if (tabScrollMax <= 0f || TabArrowSize <= 0f)
             return;
 
-        DrawTabArrow(LeftArrowPos, left: true, LeftArrowEnabled, leftArrowHovered);
-        DrawTabArrow(RightArrowPos, left: false, RightArrowEnabled, rightArrowHovered);
+        DrawTabArrow(LeftArrowPos, left: true, LeftArrowEnabled, leftArrowHovered, unreadOffLeft);
+        DrawTabArrow(RightArrowPos, left: false, RightArrowEnabled, rightArrowHovered, unreadOffRight);
     }
 
-    private void DrawTabArrow(Vector2 pos, bool left, bool enabled, bool hovered)
+    private void DrawTabArrow(Vector2 pos, bool left, bool enabled, bool hovered, bool unread)
     {
         var size = TabArrowSize;
         var drawList = ImGui.GetWindowDrawList();
@@ -884,6 +898,21 @@ public partial class MainWindow : Window, IDisposable
             center + new Vector2(-dir * arm * 0.6f, -arm),
             center + new Vector2(-dir * arm * 0.6f, arm),
             ImGui.GetColorU32(color));
+
+        if (!unread)
+            return;
+
+        // Sits in the gutter's outer top corner, away from the tabs, and
+        // pulses with the badge it stands in for so the two read as the same
+        // signal. No count: it can speak for several tabs at once.
+        var dotRadius = MathF.Max(2f, size * 0.15f);
+        var dotCenter = new Vector2(
+            left ? pos.X + dotRadius + 1f : pos.X + size - dotRadius - 1f,
+            pos.Y + dotRadius + 1f);
+
+        var pulse = 0.5f + 0.5f * MathF.Sin((float)ImGui.GetTime() * 3.5f);
+        drawList.AddCircleFilled(
+            dotCenter, dotRadius, ImGui.GetColorU32(UnreadColor with { W = 0.55f + 0.45f * pulse }));
     }
 
     private readonly Dictionary<uint, string> imguiIdToTabId = [];
@@ -1078,6 +1107,27 @@ public partial class MainWindow : Window, IDisposable
     }
 
     /// <summary>
+    /// Flags an unread tab whose badge is scrolled out of the strip, so the
+    /// arrow on that side can stand in for it. Called with the tab header as
+    /// the last submitted item; the badge sits at the header's top-right, so
+    /// that corner — not the header — decides whether it is really visible.
+    /// </summary>
+    private void NoteOffStripUnread(TabState tab)
+    {
+        // Nothing to point at, or no strip geometry yet (first frame).
+        if (tab.Unread <= 0 || tabStripMax.X <= tabStripMin.X)
+            return;
+
+        var badgeX = ImGui.GetItemRectMax().X - UnreadBadgeRadius() - 2f;
+        if (badgeX <= tabStripMin.X)
+            unreadOffLeft = true;
+        else if (badgeX >= tabStripMax.X)
+            unreadOffRight = true;
+    }
+
+    private static float UnreadBadgeRadius() => ImGui.GetFontSize() * 0.42f;
+
+    /// <summary>
     /// Draws the unread markers over the tab header (the last ImGui item):
     /// a pulsing outline plus a count bubble.
     /// </summary>
@@ -1096,11 +1146,11 @@ public partial class MainWindow : Window, IDisposable
             min + new Vector2(1f, 1f), max - new Vector2(1f, 1f),
             ImGui.GetColorU32(glow), 4f, ImDrawFlags.None, 2f);
 
-        var radius = ImGui.GetFontSize() * 0.42f;
+        var radius = UnreadBadgeRadius();
         var center = new Vector2(max.X - radius - 2, min.Y + radius + 1);
         var text = tab.Unread > 9 ? "9+" : tab.Unread.ToString();
 
-        drawList.AddCircleFilled(center, radius + 2, ImGui.GetColorU32(new Vector4(0.80f, 0.20f, 0.20f, 1f)));
+        drawList.AddCircleFilled(center, radius + 2, ImGui.GetColorU32(UnreadColor));
 
         var scale = 0.75f;
         var size = ImGui.CalcTextSize(text) * scale;
