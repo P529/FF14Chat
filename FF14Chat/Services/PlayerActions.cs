@@ -1,3 +1,4 @@
+using System;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using FFXIVClientStructs.FFXIV.Client.System.String;
@@ -40,11 +41,57 @@ public static class PlayerActions
 
     public static void Target(IPlayerCharacter player) => Plugin.TargetManager.Target = player;
 
+    /// <summary>
+    /// Targets a nearby object by exact name ("Name", or "Name@World" for a
+    /// player). The game's own /target reads its argument only up to the first
+    /// space, so it can never match a full player name; this can. False when
+    /// nothing matches, leaving the caller free to fall back to the game
+    /// command, which still owns placeholders and partial names.
+    /// </summary>
+    public static bool TargetByName(string query)
+    {
+        var (name, world) = Split(query);
+        if (name.Length == 0)
+            return false;
+
+        foreach (var obj in Plugin.ObjectTable)
+        {
+            if (!obj.IsTargetable || !string.Equals(obj.Name.TextValue, name, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (world.Length > 0
+                && (obj as IPlayerCharacter)?.HomeWorld.ValueNullable?.Name.ExtractText() != world)
+            {
+                continue;
+            }
+
+            Plugin.TargetManager.Target = obj;
+            return true;
+        }
+
+        return false;
+    }
+
     public static unsafe void Examine(IPlayerCharacter player)
     {
         var agent = AgentInspect.Instance();
         if (agent != null)
             agent->ExamineCharacter(player.EntityId);
+    }
+
+    /// <summary>
+    /// Examines "Name" or "Name@World" without touching the current target:
+    /// the inspect agent takes an entity id directly, so the player only has
+    /// to be in the object table. False when nobody nearby matches.
+    /// </summary>
+    public static bool ExamineByName(string partner)
+    {
+        var player = FindNearby(partner);
+        if (player == null)
+            return false;
+
+        Examine(player);
+        return true;
     }
 
     public static unsafe void OpenAdventurerPlate(IPlayerCharacter player)

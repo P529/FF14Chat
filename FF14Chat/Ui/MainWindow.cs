@@ -1965,7 +1965,28 @@ public class MainWindow : Window, IDisposable
         drawList.PopClipRect();
     }
 
-    private static readonly string[] TellCommands = ["/tell", "/t"];
+    /// <summary>
+    /// A command whose first argument is a name, completed from the world
+    /// instead of the command list. A tell reaches anyone, so its candidates
+    /// come from every source and carry "@World"; /target and /examine act on
+    /// an entity in the object table, so they only offer what is actually
+    /// nearby — and /target is the game's own command, which takes a bare name
+    /// (and any targetable object, not just players).
+    /// </summary>
+    private sealed record NameArgCommand(
+        string[] Forms,
+        bool NearbyOnly = false,
+        bool WithWorld = true,
+        bool IncludeNpcs = false);
+
+    private static readonly string[] TargetCommands = ["/target"];
+
+    private static readonly NameArgCommand[] NameArgCommands =
+    [
+        new(["/tell", "/t"]),
+        new(TargetCommands, NearbyOnly: true, WithWorld: false, IncludeNpcs: true),
+        new([Plugin.ExamineCommand], NearbyOnly: true),
+    ];
 
     /// <summary>Trailing ":xx" emote partial with the colon at a word start.</summary>
     private static readonly System.Text.RegularExpressions.Regex EmotePartial =
@@ -1998,26 +2019,35 @@ public class MainWindow : Window, IDisposable
 
         var wantSuggestions = inputActive && draft.Length > 1 && draft[0] == '/';
 
-        // "/tell " (or "/t ") switches from command completion to completing
-        // the name argument. Once the typed text stops prefixing any known
-        // player (i.e. the message part began), the popup disappears on its own.
-        string? tellCommand = null;
-        var tellPartial = string.Empty;
+        // "/tell " (or "/t ", "/target ", "/examine ") switches from command
+        // completion to completing the name argument. Once the typed text stops
+        // prefixing any known name (i.e. the message part began), the popup
+        // disappears on its own.
+        NameArgCommand? nameCommand = null;
+        var nameCommandText = string.Empty;
+        var namePartial = string.Empty;
         if (wantSuggestions)
         {
-            foreach (var command in TellCommands)
+            foreach (var candidate in NameArgCommands)
             {
-                if (draft.Length > command.Length
-                    && draft[command.Length] == ' '
-                    && draft.StartsWith(command, StringComparison.OrdinalIgnoreCase))
+                foreach (var command in candidate.Forms)
                 {
-                    tellCommand = draft[..command.Length];
-                    tellPartial = draft[(command.Length + 1)..];
-                    break;
+                    if (draft.Length > command.Length
+                        && draft[command.Length] == ' '
+                        && draft.StartsWith(command, StringComparison.OrdinalIgnoreCase))
+                    {
+                        nameCommand = candidate;
+                        nameCommandText = draft[..command.Length];
+                        namePartial = draft[(command.Length + 1)..];
+                        break;
+                    }
                 }
+
+                if (nameCommand != null)
+                    break;
             }
 
-            if (tellCommand == null && draft.Contains(' '))
+            if (nameCommand == null && draft.Contains(' '))
                 wantSuggestions = false;
         }
 
@@ -2031,44 +2061,68 @@ public class MainWindow : Window, IDisposable
         if (draft != suggestionQuery)
         {
             suggestionQuery = draft;
-            suggestions = tellCommand != null
-                ? QueryTellNames(tellCommand, tellPartial)
+            suggestions = nameCommand != null
+                ? QueryNames(nameCommand, nameCommandText, namePartial)
                 : commandIndex.Query(draft);
             suggestionIndex = 0;
         }
     }
 
     /// <summary>
-    /// Name suggestions for a partial "/tell " target, as full commands so
-    /// the whole-buffer acceptance path works unchanged. Sources in priority
-    /// order: open tell tabs, party, friends, nearby players.
+    /// Name suggestions for a partial name argument, as full commands so the
+    /// whole-buffer acceptance path works unchanged. Sources in priority order:
+    /// open tell tabs, party, friends, then whatever is nearby — the last of
+    /// which is sorted by distance, since in a crowd the name you want is
+    /// nearly always the one standing in front of you.
     /// </summary>
-    private List<CommandEntry> QueryTellNames(string command, string partial)
+    private List<CommandEntry> QueryNames(NameArgCommand spec, string command, string partial)
     {
         var candidates = new List<(string Key, string Source)>();
 
-        foreach (var partner in tabs.TellPartners())
-            candidates.Add((partner, "tell tab"));
-
-        foreach (var member in Plugin.PartyList)
+        // Anyone not in the object table is unreachable for /target and
+        // /examine, so those skip the remote sources entirely.
+        if (!spec.NearbyOnly)
         {
-            var name = member.Name.TextValue;
-            if (name.Length > 0)
-                candidates.Add((GameData.WithWorld(name, member.World.RowId), "party"));
+            foreach (var partner in tabs.TellPartners())
+                candidates.Add((partner, "tell tab"));
+
+            foreach (var member in Plugin.PartyList)
+            {
+                var name = member.Name.TextValue;
+                if (name.Length > 0)
+                    candidates.Add((GameData.WithWorld(name, member.World.RowId), "party"));
+            }
+
+            foreach (var friend in plugin.Presence.FriendNames())
+                candidates.Add((friend, "friend"));
         }
 
-        foreach (var friend in plugin.Presence.FriendNames())
-            candidates.Add((friend, "friend"));
-
+        var origin = Plugin.ObjectTable.LocalPlayer?.Position ?? Vector3.Zero;
+        var nearby = new List<(string Key, string Source, float Distance)>();
         foreach (var obj in Plugin.ObjectTable)
         {
-            if (obj is not Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter player)
+            var name = obj.Name.TextValue;
+            if (name.Length == 0)
                 continue;
 
-            var name = player.Name.TextValue;
-            if (name.Length > 0 && name != localFullName)
-                candidates.Add((GameData.WithWorld(name, player.HomeWorld.RowId), "nearby"));
+            var distance = Vector3.Distance(origin, obj.Position);
+            if (obj is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter player)
+            {
+                if (name == localFullName)
+                    continue;
+
+                var key = spec.WithWorld ? GameData.WithWorld(name, player.HomeWorld.RowId) : name;
+                nearby.Add((key, "nearby", distance));
+            }
+            else if (spec.IncludeNpcs && obj.IsTargetable)
+            {
+                nearby.Add((name, "npc", distance));
+            }
         }
+
+        nearby.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+        foreach (var (key, source, _) in nearby)
+            candidates.Add((key, source));
 
         return candidates
             .Where(c => c.Key.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
@@ -2076,6 +2130,26 @@ public class MainWindow : Window, IDisposable
             .Take(10)
             .Select(c => new CommandEntry($"{command} {c.Key}", c.Source))
             .ToList();
+    }
+
+    /// <summary>
+    /// Handles "/target Full Name" locally when the name matches something
+    /// nearby. False for anything else, including an unmatched name, so the
+    /// text goes out to the game unchanged.
+    /// </summary>
+    private static bool ResolveTarget(string text)
+    {
+        foreach (var command in TargetCommands)
+        {
+            if (text.Length > command.Length
+                && text[command.Length] == ' '
+                && text.StartsWith(command, StringComparison.OrdinalIgnoreCase))
+            {
+                return PlayerActions.TargetByName(text[(command.Length + 1)..].Trim());
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2293,6 +2367,17 @@ public class MainWindow : Window, IDisposable
         var text = draft.Trim();
         if (text.Length == 0)
             return true;
+
+        // The game's /target reads its argument only up to the first space, so
+        // it rejects any full player name ("Erik Jeannek" comes back as "Erik
+        // is not a valid target name") — which is exactly what the completion
+        // hands it. Resolve against the object table first; an unresolved name
+        // still goes to the game, which owns placeholders and partial matches.
+        if (ResolveTarget(text))
+        {
+            RecordHistory(text);
+            return true;
+        }
 
         // Commands address the game, not a person, so they are never
         // translated and keep the synchronous path exactly as it was.

@@ -31,6 +31,17 @@ public sealed class Plugin : IDalamudPlugin
 
     private const string CommandName = "/ff14chat";
 
+    /// <summary>
+    /// The game has no examine command, only the target context menu, so this
+    /// one is ours. Registered with the game's command manager rather than
+    /// handled inside our input box so it also works from the native chat box
+    /// and from macros.
+    /// </summary>
+    internal const string ExamineCommand = "/examine";
+
+    /// <summary>False when another plugin already owns /examine — don't unregister theirs.</summary>
+    private readonly bool examineRegistered;
+
     private const int HydrateRecentLimit = 5000;
     private const int HydrateTellLimit = 2000;
 
@@ -168,6 +179,13 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Toggle the FF14Chat window.",
         });
 
+        examineRegistered = CommandManager.AddHandler(ExamineCommand, new CommandInfo(OnExamine)
+        {
+            HelpMessage = "Examine a nearby player: /examine Name@World (no argument examines your target).",
+        });
+        if (!examineRegistered)
+            Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", ExamineCommand);
+
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
@@ -191,6 +209,8 @@ public sealed class Plugin : IDalamudPlugin
         Emotes.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
+        if (examineRegistered)
+            CommandManager.RemoveHandler(ExamineCommand);
     }
 
     /// <summary>
@@ -280,6 +300,28 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void OnCommand(string command, string args) => MainWindow.Toggle();
+
+    /// <summary>
+    /// "/examine Name@World" on a nearby player, or "/examine" on the current
+    /// target. Failures print like the game's own command errors instead of
+    /// raising a toast: the user is looking at the chat log already.
+    /// </summary>
+    private void OnExamine(string command, string args)
+    {
+        var partner = args.Trim();
+        if (partner.Length == 0)
+        {
+            if (TargetManager.Target is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter targeted)
+                PlayerActions.Examine(targeted);
+            else
+                ChatGui.PrintError("No player targeted. Usage: /examine Name@World");
+
+            return;
+        }
+
+        if (!PlayerActions.ExamineByName(partner))
+            ChatGui.PrintError($"Unable to examine {PlayerActions.Split(partner).Name}: they must be nearby.");
+    }
 
     public void ToggleMainUi() => MainWindow.Toggle();
 
