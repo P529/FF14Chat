@@ -19,13 +19,7 @@ public static class ChatColors
     {
         var table = new Dictionary<XivChatType, Vector4>(stored.Count);
         foreach (var (type, rgba) in stored)
-        {
-            table[type] = new Vector4(
-                (rgba & 0xFF) / 255f,
-                ((rgba >> 8) & 0xFF) / 255f,
-                ((rgba >> 16) & 0xFF) / 255f,
-                1f);
-        }
+            table[type] = Services.PackedColor.Unpack(rgba);
 
         overrides = table;
     }

@@ -289,7 +289,7 @@ public partial class SettingsWindow : Window, IDisposable
                 if (ImGui.ColorEdit4($"##color-{(ushort)type}", ref color,
                         ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoAlpha))
                 {
-                    config.ChannelColors[type] = PackRgba(color);
+                    config.ChannelColors[type] = Services.PackedColor.Pack(color);
                     config.Save();
                     ChatColors.SetOverrides(config.ChannelColors);
                 }
@@ -313,12 +313,6 @@ public partial class SettingsWindow : Window, IDisposable
             }
         }
     }
-
-    private static uint PackRgba(Vector4 color) =>
-        (uint)(byte)(color.X * 255f + 0.5f)
-        | ((uint)(byte)(color.Y * 255f + 0.5f) << 8)
-        | ((uint)(byte)(color.Z * 255f + 0.5f) << 16)
-        | 0xFF000000;
 
     private string historyQuery = string.Empty;
     private List<Services.MessageDatabase.SearchResult> historyResults = [];

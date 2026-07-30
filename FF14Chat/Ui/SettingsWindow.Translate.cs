@@ -306,7 +306,7 @@ public partial class SettingsWindow
         if (ImGui.ColorEdit4("##tr-color", ref color,
                 ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoAlpha))
         {
-            config.TranslationColor = PackRgba(color);
+            config.TranslationColor = Services.PackedColor.Pack(color);
             config.Save();
         }
 

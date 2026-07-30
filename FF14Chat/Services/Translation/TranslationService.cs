@@ -319,13 +319,7 @@ public sealed partial class TranslationService : IDisposable
     public static Vector4 TranslationColor(Configuration config)
     {
         var packed = config.TranslationColor;
-        return packed == 0
-            ? DefaultTranslationColor
-            : new Vector4(
-                (packed & 0xFF) / 255f,
-                ((packed >> 8) & 0xFF) / 255f,
-                ((packed >> 16) & 0xFF) / 255f,
-                1f);
+        return packed == PackedColor.None ? DefaultTranslationColor : PackedColor.Unpack(packed);
     }
 
     public void Dispose()
