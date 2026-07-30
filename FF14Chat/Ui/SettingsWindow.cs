@@ -106,7 +106,26 @@ public partial class SettingsWindow : Window, IDisposable
         themeColors = null;
     }
 
+    /// <summary>
+    /// The theme's colors and styles are pushed in PreDraw and popped in
+    /// PostDraw, which the window system calls without a finally between
+    /// them: an exception escaping here would leave those entries on ImGui's
+    /// stacks for good, and later unrelated pops elsewhere in the frame would
+    /// take them instead of their own. Contain it and draw nothing instead.
+    /// </summary>
     public override void Draw()
+    {
+        try
+        {
+            DrawBody();
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "Settings window draw failed");
+        }
+    }
+
+    private void DrawBody()
     {
         var config = plugin.Configuration;
 

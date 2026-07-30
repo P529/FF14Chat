@@ -16,6 +16,18 @@ public static class ChatLinkActions
         }
 
         // Handlers may run game functions; keep them on the framework thread.
-        Plugin.Framework.RunOnTick(() => handler.Invoke(link.CommandId, new SeString(link)));
+        // The handler belongs to another plugin, so it gets the same treatment
+        // as any other foreign call: whatever it throws stops here.
+        Plugin.Framework.RunOnTick(() =>
+        {
+            try
+            {
+                handler.Invoke(link.CommandId, new SeString(link));
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.Error(e, "{Plugin} link handler failed", link.Plugin);
+            }
+        });
     }
 }

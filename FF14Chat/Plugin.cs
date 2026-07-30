@@ -39,8 +39,10 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     internal const string ExamineCommand = "/examine";
 
-    /// <summary>False when another plugin already owns /examine — don't unregister theirs.</summary>
+    /// <summary>False when another plugin already owns the name — don't unregister theirs.</summary>
     private readonly bool examineRegistered;
+
+    private readonly bool commandRegistered;
 
     private const int HydrateRecentLimit = 5000;
     private const int HydrateTellLimit = 2000;
@@ -89,7 +91,11 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (!Configuration.Tabs.Exists(t => t.Channels.Contains(Dalamud.Game.Text.XivChatType.Party) && !t.CatchAll && t.Name != "General"))
             {
-                var index = Configuration.Tabs.FindIndex(t => t.Name == "General") + 1;
+                // No General tab (renamed or deleted on an older config) means
+                // "after General" has no meaning; append rather than let a -1
+                // put the new tab at the very front.
+                var general = Configuration.Tabs.FindIndex(t => t.Name == "General");
+                var index = general >= 0 ? general + 1 : Configuration.Tabs.Count;
                 Configuration.Tabs.Insert(index, new TabConfig
                 {
                     Name = "Party",
@@ -164,51 +170,73 @@ public sealed class Plugin : IDalamudPlugin
         // Constructed after hydration so restoring hundreds of stored lines
         // cannot fire hundreds of API calls on login.
         Translation = new TranslationService(Configuration);
-        Translation.Changed += OnTranslationChanged;
-        Framework.Update += OnFrameworkUpdate;
 
-        ChatCapture = new ChatCapture(MessageStore, TabManager, Database, Presence, Translation);
-
-        MainWindow = new MainWindow(this, TabManager);
-        SettingsWindow = new SettingsWindow(this, MainWindow);
-        WindowSystem.AddWindow(MainWindow);
-        WindowSystem.AddWindow(SettingsWindow);
-
-        CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
+        // Everything past this point either subscribes to a game event or
+        // claims a command name. Dalamud never calls Dispose on a constructor
+        // that threw, so a failure here would otherwise leave those callbacks
+        // firing forever against a half-built plugin: tear down what was
+        // already wired before letting the exception out.
+        try
         {
-            HelpMessage = "Toggle the FF14Chat window.",
-        });
+            Translation.Changed += OnTranslationChanged;
+            Framework.Update += OnFrameworkUpdate;
 
-        examineRegistered = CommandManager.AddHandler(ExamineCommand, new CommandInfo(OnExamine)
+            ChatCapture = new ChatCapture(MessageStore, TabManager, Database, Presence, Translation);
+
+            MainWindow = new MainWindow(this, TabManager);
+            SettingsWindow = new SettingsWindow(this, MainWindow);
+            WindowSystem.AddWindow(MainWindow);
+            WindowSystem.AddWindow(SettingsWindow);
+
+            commandRegistered = CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
+            {
+                HelpMessage = "Toggle the FF14Chat window.",
+            });
+
+            examineRegistered = CommandManager.AddHandler(ExamineCommand, new CommandInfo(OnExamine)
+            {
+                HelpMessage = "Examine a nearby player: /examine Name@World (no argument examines your target).",
+            });
+            if (!examineRegistered)
+                Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", ExamineCommand);
+
+            PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
+            PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
+            PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
+        }
+        catch
         {
-            HelpMessage = "Examine a nearby player: /examine Name@World (no argument examines your target).",
-        });
-        if (!examineRegistered)
-            Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", ExamineCommand);
-
-        PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
-        PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
-        PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
+            Dispose();
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Also runs on a failed construction, so every member here must tolerate
+    /// being null and every unregistration must be one this plugin actually
+    /// made — removing a command handler we never installed would unregister
+    /// whichever plugin does own that name.
+    /// </summary>
     public void Dispose()
     {
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         Framework.Update -= OnFrameworkUpdate;
-        Translation.Changed -= OnTranslationChanged;
+        if (Translation != null)
+            Translation.Changed -= OnTranslationChanged;
 
         WindowSystem.RemoveAllWindows();
-        SettingsWindow.Dispose();
-        MainWindow.Dispose();
-        ChatCapture.Dispose();
-        Translation.Dispose();
-        Presence.Dispose();
-        Database.Dispose();
+        SettingsWindow?.Dispose();
+        MainWindow?.Dispose();
+        ChatCapture?.Dispose();
+        Translation?.Dispose();
+        Presence?.Dispose();
+        Database?.Dispose();
         Emotes.Dispose();
 
-        CommandManager.RemoveHandler(CommandName);
+        if (commandRegistered)
+            CommandManager.RemoveHandler(CommandName);
         if (examineRegistered)
             CommandManager.RemoveHandler(ExamineCommand);
     }

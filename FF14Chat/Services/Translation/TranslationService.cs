@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -57,11 +58,25 @@ public sealed partial class TranslationService : IDisposable
     private long baseChars;
     private long sessionChars;
     private int consecutiveFailures;
-    private int cooldownStreak;
-    private DateTime cooldownUntil = DateTime.MinValue;
     private DateTime lastPersist = DateTime.UtcNow;
     private volatile bool paused;
     private volatile string? lastError;
+
+    // Written from batch threads, read from the draw thread (the settings tab
+    // shows the remaining cooldown). DateTime can't be volatile, and the
+    // streak is a read-modify-write that two simultaneous rate limits would
+    // otherwise race on, so both live behind this gate.
+    private readonly object cooldownGate = new();
+    private int cooldownStreak;
+    private DateTime cooldownUntil = DateTime.MinValue;
+
+    // Batches run detached so the worker can keep draining the queue, so
+    // Dispose has to know about them: everything they touch on the way out
+    // (inFlight, shutdown, http) is disposed immediately afterwards.
+    private readonly ConcurrentDictionary<Task, byte> batches = new();
+
+    /// <summary>Set before anything is torn down; batches check it instead of the disposed tokens.</summary>
+    private volatile bool disposed;
 
     public TranslationService(Configuration config)
     {
@@ -298,6 +313,7 @@ public sealed partial class TranslationService : IDisposable
 
     public void Dispose()
     {
+        disposed = true;
         queue.Writer.TryComplete();
         shutdown.Cancel();
 
@@ -308,6 +324,18 @@ public sealed partial class TranslationService : IDisposable
         catch (AggregateException)
         {
             // Cancellation on unload; nothing worth reporting.
+        }
+
+        // The worker stopping says nothing about the batches it detached;
+        // they still hold the semaphore, the token and the HttpClient that
+        // are about to go away.
+        try
+        {
+            Task.WaitAll([.. batches.Keys], TimeSpan.FromSeconds(3));
+        }
+        catch (Exception)
+        {
+            // Faulted or cancelled batches already handled their own failure.
         }
 
         PersistChars(force: true);
@@ -438,7 +466,7 @@ public sealed partial class TranslationService : IDisposable
 
                 await inFlight.WaitAsync(token).ConfigureAwait(false);
                 var work = batch.ToArray();
-                _ = Task.Run(() => TranslateBatchAsync(active, work), CancellationToken.None);
+                Track(Task.Run(() => TranslateBatchAsync(active, work), CancellationToken.None));
 
                 PersistChars(force: false);
             }
@@ -451,6 +479,17 @@ public sealed partial class TranslationService : IDisposable
         {
             Plugin.Log.Error(e, "Translation worker stopped");
         }
+    }
+
+    /// <summary>Registers a detached batch so Dispose can wait for it.</summary>
+    private void Track(Task task)
+    {
+        batches[task] = 0;
+        task.ContinueWith(
+            finished => batches.TryRemove(finished, out _),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>Fails everything queued, so no line is left spinning forever.</summary>
@@ -532,15 +571,21 @@ public sealed partial class TranslationService : IDisposable
         }
         catch (Exception e)
         {
-            if (!shutdown.IsCancellationRequested)
-                Plugin.Log.Error(e, "Translation batch failed");
-
+            // Mark the batch failed FIRST. A message left Pending is never
+            // re-queued (RequestIncoming skips anything already carrying a
+            // state), so anything that throws before this line — including a
+            // disposed token during unload — would leave those lines spinning
+            // forever.
             foreach (var message in batch)
                 message.Translation = Failed(target);
+
+            if (!disposed && !shutdown.IsCancellationRequested)
+                Plugin.Log.Error(e, "Translation batch failed");
         }
         finally
         {
-            inFlight.Release();
+            if (!disposed)
+                inFlight.Release();
             Changed?.Invoke();
         }
     }
@@ -643,29 +688,40 @@ public sealed partial class TranslationService : IDisposable
     }
 
     /// <summary>Whether the primary provider is inside a rate-limit cooldown.</summary>
-    public bool CoolingDown => DateTime.UtcNow < cooldownUntil;
+    public bool CoolingDown => CooldownRemaining > TimeSpan.Zero;
 
     /// <summary>How much longer the primary stays untouched; zero when it doesn't.</summary>
     public TimeSpan CooldownRemaining
     {
         get
         {
-            var remaining = cooldownUntil - DateTime.UtcNow;
-            return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            lock (cooldownGate)
+            {
+                var remaining = cooldownUntil - DateTime.UtcNow;
+                return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            }
         }
     }
 
     private void BeginCooldown(TimeSpan? requested)
     {
-        // Doubling only while a cooldown is still running: an isolated limit
-        // hours later is not evidence the last one was too short.
-        cooldownStreak = CoolingDown ? Math.Min(cooldownStreak + 1, MaxCooldownStreak) : 0;
+        TimeSpan wait;
+        lock (cooldownGate)
+        {
+            // Doubling only while a cooldown is still running: an isolated limit
+            // hours later is not evidence the last one was too short. Read and
+            // written under the gate so two batches limited at once can't both
+            // see the same streak and lose one escalation between them.
+            var running = cooldownUntil - DateTime.UtcNow > TimeSpan.Zero;
+            cooldownStreak = running ? Math.Min(cooldownStreak + 1, MaxCooldownStreak) : 0;
 
-        var wait = requested ?? TimeSpan.FromTicks(MinCooldown.Ticks << cooldownStreak);
-        if (wait > MaxCooldown)
-            wait = MaxCooldown;
+            wait = requested ?? TimeSpan.FromTicks(MinCooldown.Ticks << cooldownStreak);
+            if (wait > MaxCooldown)
+                wait = MaxCooldown;
 
-        cooldownUntil = DateTime.UtcNow + wait;
+            cooldownUntil = DateTime.UtcNow + wait;
+        }
+
         Plugin.Log.Information(
             "Translation provider rate limited; leaving it alone for {Seconds:0}s", wait.TotalSeconds);
     }

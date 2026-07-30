@@ -54,11 +54,19 @@ public static unsafe class GameIcons
         return true;
     }
 
-    /// <summary>Looks up an icon's atlas rect, following one redirect.</summary>
-    public static bool TryGetEntry(uint iconId, out GfdEntry entry)
+    /// <summary>Looks up an icon's atlas rect, following redirects.</summary>
+    public static bool TryGetEntry(uint iconId, out GfdEntry entry) => TryGetEntry(iconId, 0, out entry);
+
+    // Redirects are followed by recursion, and the table is game data we don't
+    // control: a cycle would recurse until the stack runs out, which takes the
+    // whole process with it (StackOverflowException can't be caught). Chat
+    // icons need one hop, so a handful is already a broken table.
+    private const int MaxRedirects = 4;
+
+    private static bool TryGetEntry(uint iconId, int depth, out GfdEntry entry)
     {
         entry = default;
-        if (iconId == 0 || !TryGetEntries(out var entries))
+        if (iconId == 0 || depth > MaxRedirects || !TryGetEntries(out var entries))
             return false;
 
         // The table is dense and 1-indexed by Id for the icons chat uses, so a
@@ -85,7 +93,7 @@ public static unsafe class GameIcons
         }
 
         if (entry.Redirect != 0)
-            return TryGetEntry(entry.Redirect, out entry);
+            return TryGetEntry(entry.Redirect, depth + 1, out entry);
 
         return !entry.IsEmpty;
     }

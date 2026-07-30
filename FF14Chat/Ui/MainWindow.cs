@@ -41,6 +41,9 @@ public class MainWindow : Window, IDisposable
     private readonly List<string> sentHistory = [];
     private int historyPos = -1;
     private string historyStash = string.Empty;
+
+    /// <summary>Tab the current history walk belongs to; a switch resets it.</summary>
+    private string historyTabId = string.Empty;
     private bool focusInput;
     private bool suppressEnterUntilReleased;
 
@@ -504,7 +507,14 @@ public class MainWindow : Window, IDisposable
         if (atkModule == null || !atkModule->AtkModule.IsTextInputActive())
             return false;
 
-        var unitManager = &AtkStage.Instance()->RaptureAtkUnitManager->AtkUnitManager;
+        // Polled every tick, including through zone changes and logout, where
+        // a bad dereference is an access violation rather than a catchable
+        // exception — i.e. the game process, not just the plugin.
+        var stage = AtkStage.Instance();
+        if (stage == null || stage->RaptureAtkUnitManager == null)
+            return false;
+
+        var unitManager = &stage->RaptureAtkUnitManager->AtkUnitManager;
         foreach (var entry in unitManager->FocusedUnitsList.Entries)
         {
             var unit = entry.Value;
@@ -1728,7 +1738,12 @@ public class MainWindow : Window, IDisposable
         if (pendingDraftRestore is { } restore)
         {
             pendingDraftRestore = null;
-            drafts[restore.TabId] = restore.Draft;
+
+            // The tab can be gone by now — a tell tab closed while its send
+            // was still translating. Writing the draft back would recreate an
+            // entry nothing will ever sweep, so only the notice survives.
+            if (Array.Exists(tabs.Snapshot(), t => t.Id == restore.TabId))
+                drafts[restore.TabId] = restore.Draft;
 
             // The widget owns its buffer while focused, so an external draft
             // write is dropped there — route it through the callback like the
@@ -1806,6 +1821,17 @@ public class MainWindow : Window, IDisposable
                 : destination is { Label.Length: > 0 } dest
                     ? $"{dest.Label}…"
                     : "Chat or /command…";
+        // A history walk belongs to the tab it started in. Every tab has its
+        // own buffer, so carrying the position across tabs would splice this
+        // tab's history over another tab's unsent draft without stashing it —
+        // and walking back down would then restore the wrong tab's stash.
+        if (historyTabId != tab.Id)
+        {
+            historyTabId = tab.Id;
+            historyPos = -1;
+            historyStash = string.Empty;
+        }
+
         var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
 

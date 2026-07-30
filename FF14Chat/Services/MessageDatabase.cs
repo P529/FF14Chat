@@ -61,9 +61,13 @@ public sealed class MessageDatabase : IDisposable
                 command.CommandText = "ALTER TABLE messages ADD COLUMN sender_job INTEGER";
                 command.ExecuteNonQuery();
             }
-            catch (SqliteException)
+            catch (SqliteException e) when (e.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
             {
-                // Column already exists.
+                // Column already exists. Anything else — a locked or corrupt
+                // file, a disk error — must not be swallowed: every SELECT
+                // below names sender_job, so silently skipping the migration
+                // turns into "no such column" during hydration, where a single
+                // catch would discard the entire restored history.
             }
         }
 
@@ -174,39 +178,60 @@ public sealed class MessageDatabase : IDisposable
             if (byId.ContainsKey(id))
                 continue;
 
-            var senderRaw = reader.GetFieldValue<byte[]>(6);
-            var messageRaw = reader.GetFieldValue<byte[]>(7);
-            var parsed = SeString.Parse(messageRaw);
-
-            byId[id] = new Message
+            // One unreadable row must cost that row, not the restore: the
+            // caller wraps this whole load in a single catch, so an escaping
+            // parse failure would discard every other line with it.
+            try
             {
-                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)).LocalDateTime,
-                Type = (XivChatType)reader.GetInt32(2),
-                Sender = reader.GetString(3),
-                Text = reader.GetString(4),
-                TellPartner = reader.IsDBNull(5) ? null : reader.GetString(5),
-                SenderRaw = senderRaw,
-                MessageRaw = messageRaw,
-                Segments = MessageParser.Parse(parsed),
-                SenderPlayer = MessageParser.ExtractPlayer(SeString.Parse(senderRaw)),
-                SenderJob = reader.IsDBNull(8) ? null : (uint)reader.GetInt64(8),
-            };
+                var senderRaw = reader.GetFieldValue<byte[]>(6);
+                var messageRaw = reader.GetFieldValue<byte[]>(7);
+                var parsed = SeString.Parse(messageRaw);
+
+                byId[id] = new Message
+                {
+                    Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)).LocalDateTime,
+                    Type = (XivChatType)reader.GetInt32(2),
+                    Sender = reader.GetString(3),
+                    Text = reader.GetString(4),
+                    TellPartner = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    SenderRaw = senderRaw,
+                    MessageRaw = messageRaw,
+                    Segments = MessageParser.Parse(parsed),
+                    SenderPlayer = MessageParser.ExtractPlayer(SeString.Parse(senderRaw)),
+                    SenderJob = reader.IsDBNull(8) ? null : (uint)reader.GetInt64(8),
+                };
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.Warning(e, "Skipping unreadable history row {Id}", id);
+            }
         }
     }
 
     public void Dispose()
     {
         queue.CompleteAdding();
+        var writerStopped = false;
         try
         {
-            writer.Wait(TimeSpan.FromSeconds(5));
+            writerStopped = writer.Wait(TimeSpan.FromSeconds(5));
         }
         catch (AggregateException)
         {
             // Writer failures are already logged; don't block unload.
+            writerStopped = true;
         }
 
-        connection.Dispose();
+        // SqliteConnection is not safe to use from two threads: disposing it
+        // out from under a writer that is still committing would abort that
+        // batch. A writer this slow (a stalled disk, an antivirus scan) is
+        // rare enough that leaking the connection to the finalizer is the
+        // better trade — it still gets to finish its transaction.
+        if (writerStopped)
+            connection.Dispose();
+        else
+            Plugin.Log.Warning("History writer still running at unload; leaving its connection open");
+
         searchConnection?.Dispose();
         queue.Dispose();
     }

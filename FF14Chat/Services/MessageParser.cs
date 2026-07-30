@@ -82,8 +82,7 @@ public static partial class MessageParser
                 case RawPayload rp:
                     if (rp.Data is { Length: > 5 } && rp.Data[1] == 0x27 && rp.Data[3] == 0x06)
                     {
-                        using var reader = new BinaryReader(new MemoryStream(rp.Data, 4, rp.Data.Length - 4));
-                        link = new SegmentLink.Achievement(GetInteger(reader));
+                        link = TryReadAchievement(rp.Data);
                     }
                     else if (IsPeriodicRecruitment(rp.Data))
                     {
@@ -262,6 +261,28 @@ public static partial class MessageParser
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Decodes an achievement id from a raw payload, or null when the bytes
+    /// turn out not to be one. The check upstream only sniffs two bytes, so
+    /// Dalamud's catch-all RawPayload for any type it lacks a class for can
+    /// reach this and then ask for more bytes than the payload holds. That is
+    /// a mis-sniff, not a broken message: it must not throw out of the chat
+    /// event handler (killing capture of the line) or out of startup
+    /// hydration (killing the whole restore).
+    /// </summary>
+    private static SegmentLink? TryReadAchievement(byte[] data)
+    {
+        try
+        {
+            using var reader = new BinaryReader(new MemoryStream(data, 4, data.Length - 4));
+            return new SegmentLink.Achievement(GetInteger(reader));
+        }
+        catch (EndOfStreamException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Reads FFXIV's variable-length integer encoding (as used by link payload ids).</summary>

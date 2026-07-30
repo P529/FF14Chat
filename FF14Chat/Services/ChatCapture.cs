@@ -51,7 +51,24 @@ public sealed class ChatCapture : IDisposable
         Plugin.ChatGui.ChatMessage -= OnChatMessage;
     }
 
+    /// <summary>
+    /// Nothing here may throw into Dalamud's chat event: the payloads are
+    /// game data we only partly understand, and one unhandled failure would
+    /// escape into the dispatcher rather than costing a single line.
+    /// </summary>
     private void OnChatMessage(IHandleableChatMessage chatMessage)
+    {
+        try
+        {
+            HandleChatMessage(chatMessage);
+        }
+        catch (Exception e)
+        {
+            Plugin.Log.Error(e, "Dropping chat message that failed to capture");
+        }
+    }
+
+    private void HandleChatMessage(IHandleableChatMessage chatMessage)
     {
         // The chat event can fire more than once for a single message (e.g.
         // one per vanilla panel displaying it); drop exact repeats arriving
