@@ -154,6 +154,20 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
+        // v6: unread badges were opt-in and only the stock Party and FC tabs
+        // ever set the flag, so every other tab — including any the user made
+        // themselves — stayed silent no matter what arrived in it. Badges are
+        // the default now; General and System keep quiet because they catch
+        // everything and would never be unlit.
+        if (Configuration.Version < 6)
+        {
+            foreach (var tab in Configuration.Tabs)
+                tab.NotifyUnread = tab.Name is not ("General" or "System");
+
+            Configuration.Version = 6;
+            Configuration.Save();
+        }
+
         Ui.ChatColors.SetOverrides(Configuration.ChannelColors);
 
         MessageStore = new MessageStore();

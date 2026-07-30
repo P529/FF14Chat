@@ -38,8 +38,14 @@ public class TabConfig
     /// <summary>Also receives non-combat messages no other tab matched.</summary>
     public bool CatchAll { get; set; }
 
-    /// <summary>Show an unread badge when messages arrive while unfocused.</summary>
-    public bool NotifyUnread { get; set; }
+    /// <summary>
+    /// Show an unread badge when messages arrive while unfocused. On by
+    /// default: a tab exists to be watched, and one that goes quiet when it
+    /// has something to say is worse than one badge too many. The General,
+    /// All and System tabs are the exception — they catch everything, so
+    /// they would simply always be lit.
+    /// </summary>
+    public bool NotifyUnread { get; set; } = true;
 
     /// <summary>
     /// Chat command plain text is sent through in this tab (e.g. "/p").
@@ -202,6 +208,7 @@ public class Configuration : IPluginConfiguration
         new TabConfig
         {
             Name = "General",
+            NotifyUnread = false,
             Channels =
             [
                 XivChatType.Say, XivChatType.Shout, XivChatType.Yell,
@@ -239,6 +246,7 @@ public class Configuration : IPluginConfiguration
         new TabConfig
         {
             Name = "System",
+            NotifyUnread = false,
             CatchAll = true,
             Channels =
             [

@@ -1180,6 +1180,14 @@ public partial class MainWindow : Window, IDisposable
         var messages = tabs.MessagesSnapshot(tab);
         // First draw of a tab (e.g. history just hydrated) starts pinned.
         var firstDraw = tab.RenderedRevision == -1;
+
+        // Only the selected tab draws, so the drawn tab changing IS the user
+        // switching to this one. Switching always lands on the newest line:
+        // a tab left scrolled up would otherwise reopen mid-backlog, showing
+        // stale lines while its badge says there is something new.
+        var justSelected = lastDrawnTabId != tab.Id;
+        lastDrawnTabId = tab.Id;
+
         var pinnedToBottom = firstDraw || ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 1f;
         var newMessages = firstDraw || tab.Revision != tab.RenderedRevision;
         tab.RenderedRevision = tab.Revision;
@@ -1243,9 +1251,12 @@ public partial class MainWindow : Window, IDisposable
         DrawItemContextMenu();
         DrawMessageContextMenu();
 
-        if (pinnedToBottom && newMessages)
+        if (justSelected || (pinnedToBottom && newMessages))
             ImGui.SetScrollHereY(1f);
     }
+
+    /// <summary>Tab whose log drew last frame; a change means the user switched tabs.</summary>
+    private string? lastDrawnTabId;
 
     private const string ItemContextPopup = "item-context";
     private uint itemContextPopupId;
