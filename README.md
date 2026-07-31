@@ -15,7 +15,7 @@ A chat replacement for Final Fantasy XIV, built as a [Dalamud](https://github.co
 - **`/examine`** — the game only offers examine through the target context menu; this adds the command, on a nearby player by name (`/examine Name@World`) or on your current target with no argument. Works from the native chat box and macros too.
 - **`/target` with full names** — the game's own command reads its argument only up to the first space, so it rejects `/target Erik Jeannek`; sent from this plugin's input, the name is matched against everything nearby instead. Anything it can't match (placeholders like `<t>`, partial names) still goes to the game untouched.
 - **Persistent history** — SQLite-backed, 30 days of retention, restored on login with correct game timestamps. Tell conversations survive restarts.
-- **Rendering** — per-channel colors, clickable item/map/player links, item tooltip cards, mention highlighting, date separators, game font, four FFXIV-native themes (Muted Gold, Rich Gold, Classic Blue, FF7 Remake) with an opacity slider.
+- **Rendering** — per-channel colors, clickable item/map/player links, item tooltip cards, mention highlighting, date separators, game font, five FFXIV-native themes (Muted Gold, Rich Gold, Classic Blue, FF7 Remake, Game Default) with an opacity slider.
 - **Emotes** — Discord-style shortcodes (`:sob:`, `:joy:`, ~1900 names) render inline as [Twemoji](https://github.com/jdecked/twemoji) images; typing `:` plus two letters autocompletes. Fully bundled, nothing downloaded; others just see the plain text.
 - **Player context menu** — right-click a name in the log or a tell tab: Send Tell, Target, Examine, Adventurer Plate, Invite to Party, Copy Name.
 

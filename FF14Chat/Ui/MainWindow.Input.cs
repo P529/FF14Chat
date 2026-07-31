@@ -275,13 +275,18 @@ public partial class MainWindow
         // progress indicator: the field stays fully usable, and it is empty
         // right after a submit — exactly when a hint is visible.
         var translating = pendingSend is { IsCompleted: false } && pendingSendTabId == tab.Id;
+
+        // Game Default puts the destination on the prompt line above the bar
+        // (as the game does), so the field itself stays empty there.
         var hint = translating
             ? "Translating…"
-            : tab.IsTell
-                ? $"Message {tab.Title}…"
-                : destination is { Label.Length: > 0 } dest
-                    ? $"{dest.Label}…"
-                    : "Chat or /command…";
+            : FFTheme.GameLayout
+                ? string.Empty
+                : tab.IsTell
+                    ? $"Message {tab.Title}…"
+                    : destination is { Label.Length: > 0 } dest
+                        ? $"{dest.Label}…"
+                        : "Chat or /command…";
         // A history walk belongs to the tab it started in. Every tab has its
         // own buffer, so carrying the position across tabs would splice this
         // tab's history over another tab's unsent draft without stashing it —
@@ -295,6 +300,12 @@ public partial class MainWindow
 
         var inputPos = ImGui.GetCursorScreenPos();
         ImGui.SetNextItemWidth(-1);
+
+        // Game Default draws the field's frame itself (square where it meets
+        // the chat-mode button, one rounded cap on the right), so the widget
+        // gets a transparent frame over it. The rect is known before the widget
+        // is submitted: SetNextItemWidth(-1) runs it to the window edge.
+        using var vanillaFrame = PushGameInputFrame(inputPos, destination?.Color);
 
         // InputText can't style a substring. With a link placeholder in the
         // draft, the widget draws its text transparent and the visible text

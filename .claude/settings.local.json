@@ -6,7 +6,9 @@
       "PowerShell(dotnet run *)",
       "Bash(git -C /e/SlopProjects/FF14Chat log --oneline -15)",
       "Bash(git -C /e/SlopProjects/FF14Chat log --since=\"3 days ago\" --stat --oneline)",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Bash(git diff *)",
+      "Bash(git status *)"
     ]
   }
 }

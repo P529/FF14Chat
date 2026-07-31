@@ -234,11 +234,19 @@ public partial class MainWindow : Window, IDisposable
 
     public override void PreDraw()
     {
+        FFTheme.Configure(plugin.Configuration);
+
         Flags = plugin.Configuration.LockWindow
             ? BaseFlags | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize
             : BaseFlags;
 
-        FFTheme.Configure(plugin.Configuration);
+        // Game Default draws its own corner grip. ImGui's native one is claimed
+        // during Begin, so it wins the click over anything drawn later — which
+        // in that layout is the strip's Close/Lock buttons, sitting in the same
+        // bottom-right corner. Dropping it hands the corner back to them.
+        if (FFTheme.GameLayout)
+            Flags |= ImGuiWindowFlags.NoResize;
+
         themeColors = FFTheme.PushColors();
         themeStyles = FFTheme.PushStyles();
         if (gameFont.Available)
@@ -548,6 +556,15 @@ public partial class MainWindow : Window, IDisposable
         UpdateFrameState();
 
         FFTheme.DrawWindowBackground();
+
+        // Game Default is a different layout, not just a palette: no header,
+        // input above a hand-drawn tab strip. See MainWindow.Vanilla.cs.
+        if (FFTheme.GameLayout)
+        {
+            DrawGameLayout();
+            return;
+        }
+
         DrawHeader();
 
         // Submitted before the tab bar so the arrows win clicks over tabs
@@ -1090,14 +1107,7 @@ public partial class MainWindow : Window, IDisposable
     /// </summary>
     private void DrawPresenceDot(TabState tab)
     {
-        var status = plugin.Presence.StatusFor(tab.TellPartner!);
-        var color = status switch
-        {
-            PresenceStatus.Online => new Vector4(0.35f, 0.85f, 0.40f, 1f),
-            PresenceStatus.Afk => new Vector4(0.90f, 0.30f, 0.25f, 1f),
-            PresenceStatus.Offline => new Vector4(0.55f, 0.55f, 0.55f, 0.90f),
-            _ => new Vector4(0.35f, 0.55f, 0.95f, 0.90f),
-        };
+        var color = PresenceColor(plugin.Presence.StatusFor(tab.TellPartner!));
 
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
@@ -1105,6 +1115,17 @@ public partial class MainWindow : Window, IDisposable
         var center = new Vector2(min.X + radius + 5f, (min.Y + max.Y) / 2f + 1f);
         ImGui.GetWindowDrawList().AddCircleFilled(center, radius, ImGui.GetColorU32(color), 12);
     }
+
+    /// <summary>Dot color for a tell partner's online status; shared by both tab strips.</summary>
+    private static Vector4 PresenceColor(PresenceStatus status) => status switch
+    {
+        PresenceStatus.Online => new Vector4(0.35f, 0.85f, 0.40f, 1f),
+        PresenceStatus.Afk => new Vector4(0.90f, 0.30f, 0.25f, 1f),
+        PresenceStatus.Offline => new Vector4(0.55f, 0.55f, 0.55f, 0.90f),
+
+        // Not a friend, not in party, not nearby — no data.
+        _ => new Vector4(0.35f, 0.55f, 0.95f, 0.90f),
+    };
 
     /// <summary>
     /// Flags an unread tab whose badge is scrolled out of the strip, so the
@@ -1245,7 +1266,10 @@ public partial class MainWindow : Window, IDisposable
         if (messages.Length == 0)
         {
             using var dim = ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp);
-            ImGui.TextWrapped("No messages yet — chat will appear here as it happens.");
+            const string empty = "No messages yet — chat will appear here as it happens.";
+            if (FFTheme.GameLayout)
+                VanillaChrome.ShadowAtCursor(empty);
+            ImGui.TextWrapped(empty);
             return;
         }
 
@@ -1390,6 +1414,8 @@ public partial class MainWindow : Window, IDisposable
         using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim))
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (width - textSize.X) / 2f);
+            if (FFTheme.GameLayout)
+                VanillaChrome.ShadowAtCursor(label);
             ImGui.TextUnformatted(label);
         }
 

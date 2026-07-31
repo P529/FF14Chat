@@ -32,7 +32,11 @@ public partial class MainWindow
         }
 
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
+        {
+            if (FFTheme.GameLayout)
+                VanillaChrome.ShadowAtCursor(message.StampCache);
             ImGui.TextUnformatted(message.StampCache);
+        }
 
         // Masked: flagged variants (source bits in the high byte) must color
         // and prefix like their base kind — Route already matches them into
@@ -352,6 +356,12 @@ public partial class MainWindow
     {
         if (!forceNewLine)
             ContinueLineIfFits(ImGui.CalcTextSize(token).X);
+
+        // The game's log has no panel behind it, so every glyph carries a hard
+        // drop shadow. Queued into the draw list first; ImGui paints the real
+        // text over it and layout is untouched.
+        if (FFTheme.GameLayout)
+            VanillaChrome.ShadowAtCursor(token);
 
         ImGui.TextUnformatted(token);
 

@@ -12,6 +12,9 @@ public enum ChatTheme
     RichGold = 1,
     ClassicBlue = 2,
     Ff7Remake = 3,
+
+    /// <summary>Flat translucent charcoal panel of the game's own chat log.</summary>
+    GameDefault = 4,
 }
 
 public enum TranslationProviderKind
