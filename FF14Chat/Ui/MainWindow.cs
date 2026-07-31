@@ -49,6 +49,9 @@ public partial class MainWindow : Window, IDisposable
     private bool focusInput;
     private bool suppressEnterUntilReleased;
 
+    /// <summary>Set by a send; the log jumps to the newest line next frame.</summary>
+    private bool scrollLogToBottom;
+
     // A send that needs its text translated first can't block the draw thread,
     // so it finishes on a continuation. Only one runs at a time (see Submit);
     // the tab it belongs to drives the input's "translating" hint.
@@ -469,6 +472,7 @@ public partial class MainWindow : Window, IDisposable
     private void DrawTabItems(TabState[] snapshot)
     {
         imguiIdToTabId.Clear();
+        submittedOrder.Clear();
         unreadOffLeft = false;
         unreadOffRight = false;
         var showFcTabs = ShouldShowFcTabs();
@@ -486,6 +490,7 @@ public partial class MainWindow : Window, IDisposable
             }
 
             DrawTabItem(tab);
+            submittedOrder.Add(tab.Id);
         }
     }
 
@@ -935,6 +940,19 @@ public partial class MainWindow : Window, IDisposable
     private readonly Dictionary<uint, string> imguiIdToTabId = [];
     private readonly List<string> orderScratch = [];
 
+    /// <summary>Tabs submitted this frame, in our order — the order they should display in.</summary>
+    private readonly List<string> submittedOrder = [];
+    private readonly HashSet<string> submittedLastFrame = [];
+
+    /// <summary>ImGui id and bar slot of each submitted tab, in display order.</summary>
+    private readonly List<(uint ImGuiId, int Slot)> barOrder = [];
+
+    // One displaced tab is moved back per frame (ImGui holds a single reorder
+    // request), and a move only lands at the next BeginTabBar; the budget is
+    // an escape hatch so a restore that can't converge can't wedge the sync.
+    private const int RestoreOrderFrames = 30;
+    private int restoreOrderFrames;
+
     /// <summary>
     /// ImGui owns drag-reordering (its order is runtime-only), so read the
     /// display order back from the tab bar's internal state and persist it.
@@ -953,13 +971,79 @@ public partial class MainWindow : Window, IDisposable
             return;
 
         orderScratch.Clear();
+        barOrder.Clear();
         for (var i = 0; i < bar.Tabs.Size; i++)
         {
-            if (imguiIdToTabId.TryGetValue(bar.Tabs[i].ID, out var tabId))
-                orderScratch.Add(tabId);
+            var imguiId = bar.Tabs[i].ID;
+            if (!imguiIdToTabId.TryGetValue(imguiId, out var tabId))
+                continue;
+
+            orderScratch.Add(tabId);
+            barOrder.Add((imguiId, i));
         }
 
+        if (RestoreTabOrder(bar))
+            return;
+
         tabs.SetOrder(orderScratch);
+    }
+
+    /// <summary>
+    /// A tab that stopped being submitted and came back — the FC tab whenever
+    /// the info proxy reads empty for a few frames, e.g. right after a login —
+    /// is APPENDED to the tab bar: for a reorderable bar ImGui keeps its own
+    /// order and ignores submission order. Nothing asked for that position, so
+    /// pushing it into the config (which the plain sync would do next) would
+    /// move the tab to the end of the strip for good. Reorder the bar back to
+    /// our order instead, and persist nothing until it has taken.
+    /// </summary>
+    /// <returns>True while a restore is in progress.</returns>
+    private bool RestoreTabOrder(ImGuiTabBarPtr bar)
+    {
+        var appeared = false;
+        foreach (var tabId in submittedOrder)
+        {
+            if (!submittedLastFrame.Contains(tabId))
+            {
+                appeared = true;
+                break;
+            }
+        }
+
+        submittedLastFrame.Clear();
+        submittedLastFrame.UnionWith(submittedOrder);
+
+        // A tab appearing for the first time (a tell tab opening) lands at the
+        // end of both orders, so it trips this and then finds nothing to fix.
+        if (appeared)
+            restoreOrderFrames = RestoreOrderFrames;
+
+        if (restoreOrderFrames <= 0)
+            return false;
+
+        restoreOrderFrames--;
+
+        for (var i = 0; i < submittedOrder.Count && i < orderScratch.Count; i++)
+        {
+            if (orderScratch[i] == submittedOrder[i])
+                continue;
+
+            var from = orderScratch.IndexOf(submittedOrder[i]);
+            if (from < 0)
+                break;
+
+            var tab = ImGuiP.TabBarFindTabByID(bar, barOrder[from].ImGuiId);
+            if (tab.IsNull)
+                break;
+
+            // Offsets count slots in the bar's own list, which can still hold
+            // a tab that was dropped from this frame's submission.
+            ImGuiP.TabBarQueueReorder(bar, tab, barOrder[i].Slot - barOrder[from].Slot);
+            return true;
+        }
+
+        restoreOrderFrames = 0;
+        return false;
     }
 
     /// <summary>Places the window over the vanilla chat log, once, on first load.</summary>
@@ -1259,6 +1343,13 @@ public partial class MainWindow : Window, IDisposable
         var justSelected = lastDrawnTabId != tab.Id;
         lastDrawnTabId = tab.Id;
 
+        // Sending is a commitment to the live conversation: however far up the
+        // backlog the log was scrolled, it lands on the newest line. One shot
+        // is enough — being at the bottom re-pins it, so the echo of the sent
+        // line and everything after it follow on their own.
+        var justSent = scrollLogToBottom;
+        scrollLogToBottom = false;
+
         var pinnedToBottom = firstDraw || ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 1f;
         var newMessages = firstDraw || tab.Revision != tab.RenderedRevision;
         tab.RenderedRevision = tab.Revision;
@@ -1325,7 +1416,7 @@ public partial class MainWindow : Window, IDisposable
         DrawItemContextMenu();
         DrawMessageContextMenu();
 
-        if (justSelected || (pinnedToBottom && newMessages))
+        if (justSelected || justSent || (pinnedToBottom && newMessages))
             ImGui.SetScrollHereY(1f);
     }
 

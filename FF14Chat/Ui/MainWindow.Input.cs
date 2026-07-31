@@ -62,7 +62,8 @@ public partial class MainWindow
         }
     }
 
-    internal unsafe void GameKeybindChannel(int channel, uint linkshell)
+    /// <summary>Switches the game's active input channel, nothing else.</summary>
+    private static unsafe void ChangeGameChannel(int channel, uint linkshell)
     {
         var shell = RaptureShellModule.Instance();
         if (shell == null)
@@ -77,6 +78,11 @@ public partial class MainWindow
         {
             empty->Dtor(true);
         }
+    }
+
+    internal void GameKeybindChannel(int channel, uint linkshell)
+    {
+        ChangeGameChannel(channel, linkshell);
 
         // The channel's dedicated tab (Party, FC, …) is always selected when
         // one exists. Channels without one (yell, linkshells, …) fall back
@@ -120,6 +126,73 @@ public partial class MainWindow
         8 => ["/n", "/novice"],
         _ => null,
     };
+
+    /// <summary>Numbered channel families: long form, short form, channel of #1.</summary>
+    private static readonly (string Long, string Short, int FirstChannel)[] LinkshellForms =
+    [
+        ("/cwlinkshell", "/cwl", 9),
+        ("/linkshell", "/l", 19),
+    ];
+
+    /// <summary>
+    /// The input channel a leading command switches to, null when the command
+    /// isn't a channel prefix. The inverse of <see cref="ChannelSendCommands"/>,
+    /// plus the linkshells — those have no dedicated tab, so they aren't in it.
+    /// </summary>
+    private static (int Channel, uint Linkshell)? ChannelForCommand(string command)
+    {
+        var fixedChannel = command switch
+        {
+            "/s" or "/say" => 1,
+            "/p" or "/party" => 2,
+            "/a" or "/alliance" => 3,
+            "/y" or "/yell" => 4,
+            "/sh" or "/shout" => 5,
+            "/fc" or "/freecompany" => 6,
+            "/pvpt" or "/pvpteam" => 7,
+            "/n" or "/novice" or "/b" or "/beginner" => 8,
+            _ => 0,
+        };
+
+        if (fixedChannel != 0)
+            return (fixedChannel, 0);
+
+        foreach (var (longForm, shortForm, firstChannel) in LinkshellForms)
+        {
+            // Long form first: "/linkshell1" also starts with the short "/l".
+            var digit = command.StartsWith(longForm, StringComparison.Ordinal)
+                ? command[longForm.Length..]
+                : command.StartsWith(shortForm, StringComparison.Ordinal)
+                    ? command[shortForm.Length..]
+                    : null;
+
+            if (digit is { Length: 1 } && digit[0] is >= '1' and <= '8')
+            {
+                var index = (uint)(digit[0] - '1');
+                return (firstChannel + (int)index, index);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Leaves the input in the channel a just-sent "/p lmao" addressed, so the
+    /// follow-up line goes to the same place — the game itself only does that
+    /// for a bare "/p". Tabs with a fixed destination are left alone: their
+    /// next line goes where the tab says no matter what the active channel is.
+    /// </summary>
+    private static void PersistChannel(TabState tab, string text)
+    {
+        if (tab.IsTell || tab.SendCommand is { Length: > 0 } || text.Length == 0 || text[0] != '/')
+            return;
+
+        var end = text.IndexOf(' ');
+        var command = (end < 0 ? text : text[..end]).ToLowerInvariant();
+
+        if (ChannelForCommand(command) is { } destination)
+            ChangeGameChannel(destination.Channel, destination.Linkshell);
+    }
 
     private void SwitchToNextTab(TabState current, int direction)
     {
@@ -352,6 +425,7 @@ public partial class MainWindow
         if (Submit(tab, draft))
         {
             drafts[tab.Id] = string.Empty;
+            scrollLogToBottom = true;
 
             // Match vanilla: sending hands control back to the game (WASD
             // works immediately); Enter re-opens the input.
@@ -908,6 +982,7 @@ public partial class MainWindow
         }
 
         RecordHistory(text);
+        PersistChannel(tab, text);
         return true;
     }
 
