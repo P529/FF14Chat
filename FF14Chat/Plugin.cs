@@ -27,6 +27,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IPartyList PartyList { get; private set; } = null!;
     [PluginService] internal static Dalamud.Plugin.Services.ITargetManager TargetManager { get; private set; } = null!;
+    [PluginService] internal static IContextMenu ContextMenu { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private const string CommandName = "/ff14chat";
@@ -39,8 +40,18 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     internal const string ExamineCommand = "/examine";
 
+    /// <summary>
+    /// Reads the mount off a nearby character. Registered with the game's
+    /// command manager for the same reason /examine is: it then works from the
+    /// native chat box and from macros too. Not "/mount" — that one is the
+    /// game's own summon command, and a Dalamud handler would shadow it.
+    /// </summary>
+    internal const string MountCommand = "/mountid";
+
     /// <summary>False when another plugin already owns the name — don't unregister theirs.</summary>
     private readonly bool examineRegistered;
+
+    private readonly bool mountRegistered;
 
     private readonly bool commandRegistered;
 
@@ -56,6 +67,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public readonly WindowSystem WindowSystem = new("FF14Chat");
     private ChatCapture ChatCapture { get; init; }
+    private GameContextMenu GameContextMenu { get; init; }
     private MainWindow MainWindow { get; init; }
     private SettingsWindow SettingsWindow { get; init; }
 
@@ -214,6 +226,15 @@ public sealed class Plugin : IDalamudPlugin
             if (!examineRegistered)
                 Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", ExamineCommand);
 
+            mountRegistered = CommandManager.AddHandler(MountCommand, new CommandInfo(OnMount)
+            {
+                HelpMessage = "Show what mount a character is riding: /mountid Name@World (no argument uses your target).",
+            });
+            if (!mountRegistered)
+                Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", MountCommand);
+
+            GameContextMenu = new GameContextMenu(Configuration);
+
             PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
             PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
             PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
@@ -244,6 +265,7 @@ public sealed class Plugin : IDalamudPlugin
         SettingsWindow?.Dispose();
         MainWindow?.Dispose();
         ChatCapture?.Dispose();
+        GameContextMenu?.Dispose();
         Translation?.Dispose();
         Presence?.Dispose();
         Database?.Dispose();
@@ -253,6 +275,8 @@ public sealed class Plugin : IDalamudPlugin
             CommandManager.RemoveHandler(CommandName);
         if (examineRegistered)
             CommandManager.RemoveHandler(ExamineCommand);
+        if (mountRegistered)
+            CommandManager.RemoveHandler(MountCommand);
     }
 
     /// <summary>
@@ -363,6 +387,56 @@ public sealed class Plugin : IDalamudPlugin
 
         if (!PlayerActions.ExamineByName(partner))
             ChatGui.PrintError($"Unable to examine {PlayerActions.Split(partner).Name}: they must be nearby.");
+    }
+
+    /// <summary>
+    /// "/mountid Name@World", or "/mountid" for the current target. Prints the
+    /// mount as a clickable item link where one exists — MessageParser already
+    /// turns item payloads into links, so it lands in our own window with the
+    /// tooltip and context menu for free.
+    /// </summary>
+    private void OnMount(string command, string args)
+    {
+        var query = args.Trim();
+
+        // ICharacter rather than IPlayerCharacter on the no-argument path, so
+        // a mounted NPC works too.
+        var character = query.Length == 0
+            ? TargetManager.Target as Dalamud.Game.ClientState.Objects.Types.ICharacter
+            : PlayerActions.FindNearby(query);
+
+        if (character == null)
+        {
+            ChatGui.PrintError(query.Length == 0
+                ? "No character targeted. Usage: /mountid Name@World"
+                : $"Unable to check {PlayerActions.Split(query).Name}: they must be nearby.");
+            return;
+        }
+
+        var name = character.Name.TextValue;
+        var mountId = MountActions.MountId(character);
+        if (mountId == 0)
+        {
+            ChatGui.Print($"{name} is not mounted.", "FF14Chat");
+            return;
+        }
+
+        var message = new Dalamud.Game.Text.SeStringHandling.SeStringBuilder()
+            .AddText($"{name} is riding ");
+
+        var itemId = MountActions.TeachingItemId(mountId);
+        if (itemId != 0)
+        {
+            // The item name is always properly cased, and it is the thing
+            // being linked anyway.
+            message.AddItemLink(itemId, false);
+        }
+        else
+        {
+            message.AddText(MountActions.MountName(mountId) ?? $"mount #{mountId}");
+        }
+
+        ChatGui.Print(message.AddText(".").Build(), "FF14Chat");
     }
 
     public void ToggleMainUi() => MainWindow.Toggle();

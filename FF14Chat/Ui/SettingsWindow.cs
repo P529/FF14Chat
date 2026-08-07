@@ -249,6 +249,9 @@ public partial class SettingsWindow : Window, IDisposable
         Toggle(config, "Native item tooltips",
             config.NativeItemTooltips, static (c, v) => c.NativeItemTooltips = v,
             "The game's own tooltip on item links instead of the plugin's card.");
+        Toggle(config, "\"Try On Original\" in the game's item menus",
+            config.TryOnOriginalMenuItem, static (c, v) => c.TryOnOriginalMenuItem = v,
+            "Right-clicking a glamoured item gains an entry that previews the\nitem's own model, without the glamour or the dye on top of it.");
 
         SectionHeader("Tabs");
 

@@ -27,6 +27,30 @@ state of what actually works.
 - FFXIV-native theming (4 themes), game font, item/map/player links with
   custom item tooltip cards.
 
+### Added 2026-08-07 (v0.3.3)
+- **`/mountid [Name@World]`** — prints what a character is riding, as a clickable
+  item link to the whistle/card that teaches the mount, so the tooltip and the
+  item context menu come along for free. No argument reads the current target
+  (any `ICharacter`, so mounted NPCs work too); a name is resolved out of the
+  object table like `/examine`, since the mount can only be read off an object
+  that is actually loaded. Mounts with no teaching item — the Company Chocobo
+  above all, plus quest and event rewards granted server-side — fall back to
+  the `Mount` sheet name, capitalized (the sheet stores common nouns lowercase
+  because the game capitalizes at render time). The mount → item reverse index
+  is built once on first use; the `Mount` sheet has no back-reference.
+  Registered with the game's command manager, so it works from the native chat
+  box and macros, and it completes names in our input like `/examine`. Named
+  `/mountid`, not `/mount`: the latter is the game's own summon command, and a
+  Dalamud handler on that name shadows it.
+- **"Try On Original"** in the game's own item context menus — the native Try
+  On previews the item as glamoured and dyed, which is precisely what you are
+  trying to see past. This one passes zero for both. Glamour lives on the
+  inventory item (plates write it onto each equipped piece), so `GlamourId`
+  covers prism and plate glamours alike, and the entry only appears when there
+  is something to strip: on an unglamoured item it would be a byte-identical
+  duplicate of the native entry. Equippable items only, bottom of the menu,
+  toggleable in settings.
+
 ### Added 2026-07-28 — translation (v0.3.0)
 - **Translate tab in settings.** Off by default; first enable shows a
   confirmation naming what leaves the machine (tells included).
@@ -224,7 +248,13 @@ state of what actually works.
   full-width-window case, ChatTwo-style input preview line.
 
 ## State of the tree
-- Public at https://github.com/P529/FF14Chat; latest release **v0.2.1**
+- Public at https://github.com/P529/FF14Chat; latest release **v0.3.3.0**
+  (2026-08-07): `/mountid` and "Try On Original", plus the README rewritten
+  around the shipped feature set.
+- **v0.3.2.0** (2026-08-05): sent lines keep their channel, the log lands on
+  the newest line, tab slots hold. Earlier: **v0.3.1.0**, **v0.3.0.0**
+  (translation), **v0.2.3.x** fixes.
+- Older note, kept for the release mechanics — latest release **v0.2.1**
   (2026-07-12): hidden tabs (FC tab without a free company, or during the
   login frames where CompanyTag reads empty) no longer lose their saved
   position — SetOrder used to sort absent tabs to the end and persist it.

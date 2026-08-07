@@ -558,6 +558,7 @@ public partial class MainWindow
         new(["/tell", "/t"]),
         new(TargetCommands, NearbyOnly: true, WithWorld: false, IncludeNpcs: true),
         new([Plugin.ExamineCommand], NearbyOnly: true),
+        new([Plugin.MountCommand], NearbyOnly: true),
     ];
 
     /// <summary>Trailing ":xx" emote partial with the colon at a word start.</summary>

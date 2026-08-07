@@ -8,6 +8,25 @@ public static unsafe class ItemActions
 {
     public static void TryOn(uint itemId) => AgentTryon.TryOn(0xFF, itemId, 0);
 
+    /// <summary>
+    /// Try-on preview of the item's own model: no glamour, no dye. The game's
+    /// native Try On passes the item's glamour id and stains here; we pass
+    /// zeroes, which is what makes this "original".
+    /// </summary>
+    public static void TryOnOriginal(uint itemId)
+    {
+        try
+        {
+            AgentTryon.TryOn(0xFF, itemId, 0, 0, 0, false);
+        }
+        catch (System.Exception e)
+        {
+            // A patch-day signature break should say so rather than silently
+            // do nothing, same as ChatSender.
+            Plugin.Log.Error(e, "Try On Original failed for item {ItemId}", itemId);
+        }
+    }
+
     public static void Compare(uint itemId)
     {
         var agent = AgentItemComp.Instance();

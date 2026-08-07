@@ -2,7 +2,7 @@
   "Author": "P529",
   "Name": "FF14Chat",
   "Punchline": "Tabbed chat replacement with tell tabs and command autocompletion.",
-  "Description": "A chat replacement window: configurable tabs, a separate tab per tell conversation, command autocompletion, and persistent chat history. Toggle with /ff14chat.",
+  "Description": "A chat replacement window: configurable tabs, a separate tab per tell conversation, command autocompletion, and persistent chat history. Toggle with /ff14chat. Also adds /mountid, which prints the mount a nearby character is riding, and a \"Try On Original\" entry to the game's item context menus that previews a glamoured item's own model.",
   "ApplicableVersion": "any",
   "RepoUrl": "https://github.com/P529/FF14Chat",
   "Tags": [

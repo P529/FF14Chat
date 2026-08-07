@@ -6,18 +6,56 @@ A chat replacement for Final Fantasy XIV, built as a [Dalamud](https://github.co
 
 ## Features
 
-- **Tabs** — configurable fixed tabs (General, Party, FC, System by default) with drag-reorder, unread badges with a pulsing glow, an optional combined "All" tab, and a full tab editor in settings (add/rename/delete tabs, per-tab channel filters, unread tracking, catch-all, send channel).
-- **Tell tabs** — a separate tab per conversation partner (`Name@World`), auto-spawned on the first tell, closable, restored across restarts with history backfilled. Presence dot per partner: green online, red AFK, gray offline (friends), blue unknown.
-- **Send Tell integration** — "Send Tell" from any game menu (social window, friend list, search) opens the right tab with the input focused; vanilla chat stays closed.
-- **Per-tab send channel** — plain text in the Party tab goes out as `/p`, in FC as `/fc`, in a tell tab as `/tell Name@World`; typed `/commands` always pass through unchanged.
-- **Input, like vanilla but better** — Enter or `/` opens the input (occupied states like cutscenes and NPC dialogue are respected); sending hands control straight back to the game; Tab cycles tabs/channels (Shift+Tab backwards); up/down recalls sent history; drafts are kept per tab.
-- **Autocomplete** — every game command and emote with descriptions from the game's own data, plugin commands included; `/tell ` completes player names from open tells, party, friends, and nearby players, while `/target ` and `/examine ` complete what is actually around you, closest first (`/target` includes NPCs and enemies).
-- **`/examine`** — the game only offers examine through the target context menu; this adds the command, on a nearby player by name (`/examine Name@World`) or on your current target with no argument. Works from the native chat box and macros too.
-- **`/target` with full names** — the game's own command reads its argument only up to the first space, so it rejects `/target Erik Jeannek`; sent from this plugin's input, the name is matched against everything nearby instead. Anything it can't match (placeholders like `<t>`, partial names) still goes to the game untouched.
-- **Persistent history** — SQLite-backed, 30 days of retention, restored on login with correct game timestamps. Tell conversations survive restarts.
-- **Rendering** — per-channel colors, clickable item/map/player links, item tooltip cards, mention highlighting, date separators, game font, five FFXIV-native themes (Muted Gold, Rich Gold, Classic Blue, FF7 Remake, Game Default) with an opacity slider.
+### Tabs
+
+- **Configurable fixed tabs** — General, Party, FC and System out of the box, with drag-reorder, unread badges under a pulsing gold glow, an optional combined "All" tab, and a full editor in settings: add/rename/delete tabs, per-tab channel filter grid, unread tracking, catch-all, send channel. The FC tab hides itself when the character has no free company.
+- **A tab per tell conversation** — auto-spawned on the first tell with `Name@World`, closable, restored across restarts with its history backfilled. Each carries a presence dot: green online, red AFK, gray offline (friends), blue unknown.
+- **Failed tells land where they belong** — when a tell bounces (recipient in a duty, offline), the game's error line is routed into that conversation's tab instead of a generic system tab.
+
+### Input
+
+- **Vanilla behavior, kept** — Enter or `/` opens the input, occupied states like cutscenes and NPC dialogue are respected, and sending hands control straight back to the game so WASD works immediately.
+- **Per-tab send channel** — plain text in the Party tab goes out as `/p`, in FC as `/fc`, in a tell tab as `/tell Name@World`; typed `/commands` always pass through unchanged. The input border and hint tint themselves with the destination channel's color.
+- **Tab cycles** tabs, or the game's active channel on General/System (Shift+Tab backwards); ↑/↓ recalls sent messages; drafts are kept per tab.
+- **The game's own chat keybinds work** — Alt+R reply, Alt+P party, Alt+F FC, say/yell/shout/alliance, LS and CWLS 1-8, read live from your keybind config. A channel bind also selects the matching tab.
+- **Item linking** — "Link" from the inventory inserts `<item>` into the input, rendered blue inline with a preview line naming the staged item.
+
+### Commands
+
+- **Autocomplete for everything** — every game command with the description from the game's own data, plugin commands included. `/tell ` completes player names from open tells, party, friends and nearby players; `/target `, `/examine ` and `/mountid ` complete what is actually around you, closest first (`/target` includes NPCs and enemies).
+- **`/examine [Name@World]`** — the game only offers examine through the target context menu. This adds the command: a nearby player by name, or your current target with no argument.
+- **`/mountid [Name@World]`** — prints what a character is riding as a clickable link to the whistle or card that teaches that mount, tooltip and item menu included. Mounts that have no item (the Company Chocobo, quest and event rewards) print their name instead. Mounted NPCs work too.
+- **`/target` with full names** — the game's own command reads its argument only up to the first space, so it rejects `/target Erik Jeannek`. Sent from this plugin's input, the name is matched against everything nearby instead; anything it can't match (placeholders like `<t>`, partial names) still goes to the game untouched.
+
+Both `/examine` and `/mountid` are registered with the game's command manager, so they also work from the native chat box and from macros.
+
+### Chat display
+
+- **Rendering** — per-channel colors (overridable), clickable item/map/player/URL links, mention highlighting, date separators, duplicate-message collapse (×N), 12- or 24-hour timestamps, role colors and job icons on party chat, the game font throughout.
+- **Five FFXIV-native themes** — Muted Gold, Rich Gold, Classic Blue, FF7 Remake, Game Default — with an opacity slider and auto-hide rules (cutscenes and hidden-UI by default; loading screens and combat opt-in).
 - **Emotes** — Discord-style shortcodes (`:sob:`, `:joy:`, ~1900 names) render inline as [Twemoji](https://github.com/jdecked/twemoji) images; typing `:` plus two letters autocompletes. Fully bundled, nothing downloaded; others just see the plain text.
+
+### Translation
+
+Off by default; enabling it shows exactly what leaves your machine first.
+
+- **Backends** — Google/Bing/Yandex with no account needed, DeepL with an API key, Anthropic, or any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter). Optional fallback to the free backends when the chosen one fails or is out of quota, and a rate-limit cooldown that never hammers a provider that answered 429.
+- **Incoming** — translated text replaces the body in its own color; hovering shows the original under a "JA → English" header. Only lines a player typed are eligible, narrowed further by a per-channel grid.
+- **Outgoing** — your message is translated before it sends, asynchronously; a failure hands the draft back rather than sending the wrong thing.
+- **On demand** — right-click any message → Translate / Show original, ignoring every filter, so translation can stay off day to day.
+
+### Game integration
+
+- **Send Tell** from any game menu (social window, friend list, search) opens the right tab with the input focused; vanilla chat stays closed.
 - **Player context menu** — right-click a name in the log or a tell tab: Send Tell, Target, Examine, Adventurer Plate, Invite to Party, Copy Name.
+- **Message context menu** — right-click any line: Translate / Show original, Copy Text.
+- **Item links** open the game's own tooltip on hover and a vanilla-style menu on click: Try On, Item Comparison, Search for Item, Search Recipes, Link, Copy Name.
+- **"Try On Original"** is added to the game's own item context menus. The native Try On previews an item as it is glamoured and dyed — this one previews the item's actual model. It only appears on glamoured equipment, where it has something to strip.
+
+### History
+
+- **Persistent, SQLite-backed** — restored on login with correct game timestamps, tell conversations included. Retention runs from session-only to forever (30 days by default), with the database size shown in settings.
+- **Searchable** — full history search in the settings History tab.
 
 ## Installing
 
@@ -41,6 +79,8 @@ Gets you automatic updates whenever a new release is published.
 | Input | Action |
 |---|---|
 | `/ff14chat` | Toggle the window |
+| `/examine [Name@World]` | Examine a nearby player, or your target |
+| `/mountid [Name@World]` | Show what a nearby character is riding, or your target |
 | Enter | Open the chat input (sends and releases it when typing) |
 | `/` | Open the input with a `/` pre-typed |
 | Tab (empty input) | Cycle tabs, or the game's active channel on General/System |
@@ -50,7 +90,7 @@ Gets you automatic updates whenever a new release is published.
 | Right-click a player name | Context menu (tell, target, examine, invite...) |
 | Right-click a tab | Close / mark read (tell tabs) |
 
-Settings (`/xlplugins` → FF14Chat → gear icon, or the gear in the window): themes, font size, opacity, tab editor, mention highlight, presence dots, vanilla chat hiding, window lock.
+Settings (`/xlplugins` → FF14Chat → gear icon, or the gear in the window): themes, font size, opacity, tab editor, colors, translation, history search and retention, mention highlight, presence dots, vanilla chat hiding, window lock.
 
 Chat history is stored in `%AppData%\XIVLauncher\pluginConfigs\FF14Chat\chat.db` (SQLite). Delete the file to wipe history; it prunes itself to 30 days.
 
@@ -102,6 +142,9 @@ For development, register `FF14Chat\bin\Debug\` as a Dev Plugin Location and reb
 | `Services/PresenceTracker.cs` | Online/AFK/offline for tell partners |
 | `Services/CommandIndex.cs` | Autocomplete sources |
 | `Services/Emotes.cs` | `:shortcode:` emotes: bundled Twemoji textures + completion |
+| `Services/Translation/` | Translation backends, batching, cache, rate limits |
+| `Services/MountActions.cs` | `/mountid`: mount sheet lookups, mount → teaching item |
+| `Services/GameContextMenu.cs` | "Try On Original" in the game's item menus |
 | `Ui/MainWindow.cs` | The chat window: tabs, log, input, links, hooks |
 | `Ui/SettingsWindow.cs` | Settings and the tab editor |
 
