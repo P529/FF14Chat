@@ -148,6 +148,12 @@ public partial class SettingsWindow : Window, IDisposable
                 DrawColorsTab(config);
         }
 
+        using (var tab = ImRaii.TabItem("Tweaks"))
+        {
+            if (tab.Success)
+                DrawTweaksTab(config);
+        }
+
         using (var tab = ImRaii.TabItem("History"))
         {
             if (tab.Success)
@@ -249,9 +255,6 @@ public partial class SettingsWindow : Window, IDisposable
         Toggle(config, "Native item tooltips",
             config.NativeItemTooltips, static (c, v) => c.NativeItemTooltips = v,
             "The game's own tooltip on item links instead of the plugin's card.");
-        Toggle(config, "\"Try On Original\" in the game's item menus",
-            config.TryOnOriginalMenuItem, static (c, v) => c.TryOnOriginalMenuItem = v,
-            "Right-clicking a glamoured item gains an entry that previews the\nitem's own model, without the glamour or the dye on top of it.");
 
         SectionHeader("Tabs");
 
@@ -273,6 +276,57 @@ public partial class SettingsWindow : Window, IDisposable
 
         if (ImGui.CollapsingHeader("Tab editor"))
             DrawTabEditor(config);
+    }
+
+    /// <summary>
+    /// The bits that change the game outside the chat window: extra commands
+    /// and the item-menu shortcuts. All of them are additions to vanilla, so
+    /// each one switches off cleanly.
+    /// </summary>
+    private void DrawTweaksTab(Configuration config)
+    {
+        SectionHeader("Commands", first: true);
+
+        using (ImRaii.PushColor(ImGuiCol.Text, FFTheme.TextDim))
+        {
+            ImGui.TextWrapped(
+                "Registered with the game, so they work in the native chat box and in macros too. "
+                + "Switching one off releases the name for other plugins.");
+        }
+
+        ImGui.Spacing();
+
+        CommandToggle(config, "/examine Name@World",
+            config.ExamineCommandEnabled, static (c, v) => c.ExamineCommandEnabled = v,
+            "Examines a nearby player. No argument examines your current target.\nThe game has no command for this, only the target's context menu.");
+        CommandToggle(config, "/mountid Name@World",
+            config.MountIdCommandEnabled, static (c, v) => c.MountIdCommandEnabled = v,
+            "Prints the mount a nearby character is riding, with its id.\nNo argument uses your current target.");
+
+        SectionHeader("Item menus");
+
+        Toggle(config, "\"Try On Original\" entry",
+            config.TryOnOriginalMenuItem, static (c, v) => c.TryOnOriginalMenuItem = v,
+            "Right-clicking a glamoured item gains an entry that previews the\nitem's own model, without the glamour or the dye on top of it.\nAlso appears on the examine window's gear.");
+        Toggle(config, "Ctrl+right-click tries an item on",
+            config.CtrlRightClickTryOn, static (c, v) => c.CtrlRightClickTryOn = v,
+            "Ctrl+right-click an equippable item — in the game's inventory,\ncharacter and examine windows, or on a chat item link — and it is\ntried on straight away, base model, no menu.");
+    }
+
+    /// <summary>Toggle that also (un)registers the command it names.</summary>
+    private void CommandToggle(
+        Configuration config, string label, bool value,
+        Action<Configuration, bool> apply, string tooltip)
+    {
+        if (ImGui.Checkbox(label, ref value))
+        {
+            apply(config, value);
+            config.Save();
+            plugin.ApplyCommandTweaks();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
     }
 
     private void DrawColorsTab(Configuration config)

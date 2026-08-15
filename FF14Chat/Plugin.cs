@@ -48,10 +48,17 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     internal const string MountCommand = "/mountid";
 
-    /// <summary>False when another plugin already owns the name — don't unregister theirs.</summary>
-    private readonly bool examineRegistered;
+    private const string ExamineHelp =
+        "Examine a nearby player: /examine Name@World (no argument examines your target).";
 
-    private readonly bool mountRegistered;
+    private const string MountHelp =
+        "Show what mount a character is riding: /mountid Name@World (no argument uses your target).";
+
+    /// <summary>False when another plugin already owns the name, or when the
+    /// tweak is switched off — either way, don't unregister someone else's.</summary>
+    private bool examineRegistered;
+
+    private bool mountRegistered;
 
     private readonly bool commandRegistered;
 
@@ -219,19 +226,7 @@ public sealed class Plugin : IDalamudPlugin
                 HelpMessage = "Toggle the FF14Chat window.",
             });
 
-            examineRegistered = CommandManager.AddHandler(ExamineCommand, new CommandInfo(OnExamine)
-            {
-                HelpMessage = "Examine a nearby player: /examine Name@World (no argument examines your target).",
-            });
-            if (!examineRegistered)
-                Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", ExamineCommand);
-
-            mountRegistered = CommandManager.AddHandler(MountCommand, new CommandInfo(OnMount)
-            {
-                HelpMessage = "Show what mount a character is riding: /mountid Name@World (no argument uses your target).",
-            });
-            if (!mountRegistered)
-                Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", MountCommand);
+            ApplyCommandTweaks();
 
             GameContextMenu = new GameContextMenu(Configuration);
 
@@ -244,6 +239,35 @@ public sealed class Plugin : IDalamudPlugin
             Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Brings the optional commands in line with their settings toggles. Safe
+    /// to call at any time: it only adds what isn't ours yet and only removes
+    /// what is.
+    /// </summary>
+    internal void ApplyCommandTweaks()
+    {
+        SetCommand(Configuration.ExamineCommandEnabled, ExamineCommand, ExamineHelp, OnExamine, ref examineRegistered);
+        SetCommand(Configuration.MountIdCommandEnabled, MountCommand, MountHelp, OnMount, ref mountRegistered);
+    }
+
+    private static void SetCommand(
+        bool wanted, string name, string help, IReadOnlyCommandInfo.HandlerDelegate handler, ref bool registered)
+    {
+        if (wanted == registered)
+            return;
+
+        if (!wanted)
+        {
+            CommandManager.RemoveHandler(name);
+            registered = false;
+            return;
+        }
+
+        registered = CommandManager.AddHandler(name, new CommandInfo(handler) { HelpMessage = help });
+        if (!registered)
+            Log.Warning("{Command} is already taken by another plugin; the chat completion will not work", name);
     }
 
     /// <summary>

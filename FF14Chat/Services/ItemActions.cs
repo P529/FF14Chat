@@ -27,6 +27,15 @@ public static unsafe class ItemActions
         }
     }
 
+    /// <summary>
+    /// Whether the item occupies a gear slot, i.e. whether trying it on means
+    /// anything. Also excludes facewear, which lives in a different sheet.
+    /// </summary>
+    public static bool Equippable(uint itemId) =>
+        itemId is > 0 and < 500_000
+        && Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().TryGetRow(itemId, out var row)
+        && row.EquipSlotCategory.RowId != 0;
+
     public static void Compare(uint itemId)
     {
         var agent = AgentItemComp.Instance();

@@ -125,6 +125,18 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public bool TryOnOriginalMenuItem { get; set; } = true;
 
+    /// <summary>
+    /// Ctrl+right-click on an equippable item tries it on straight away — in
+    /// the game's item menus (which never open) and on chat item links.
+    /// </summary>
+    public bool CtrlRightClickTryOn { get; set; }
+
+    /// <summary>Registers /examine. Off releases the name for other plugins.</summary>
+    public bool ExamineCommandEnabled { get; set; } = true;
+
+    /// <summary>Registers /mountid. Off releases the name for other plugins.</summary>
+    public bool MountIdCommandEnabled { get; set; } = true;
+
     /// <summary>History retention: -1 forever, 0 wiped on every load, else days.</summary>
     public int RetentionDays { get; set; } = 30;
 

@@ -26,9 +26,11 @@ public partial class MainWindow
         if (message.StampCache == null || message.StampCache24h != use24h)
         {
             message.StampCache24h = use24h;
+            // Trailing space is part of the item: the line continues with
+            // SameLine(0, 0), so the gap has to come from the stamp's width.
             message.StampCache = use24h
-                ? $"[{message.Timestamp:HH:mm}]"
-                : $"[{message.Timestamp:h:mm tt}]";
+                ? $"[{message.Timestamp:HH:mm}] "
+                : $"[{message.Timestamp:h:mm tt}] ";
         }
 
         using (ImRaii.PushColor(ImGuiCol.Text, ChatColors.Timestamp))
@@ -390,10 +392,21 @@ public partial class MainWindow
                     DrawItemTooltip(item);
                 }
 
-                if (clicked || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                var rightClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Right);
+
+                // Ctrl+right-click is the shortcut for the menu's own Try On,
+                // matching what it does on the game's item menus.
+                if (rightClicked && ImGui.GetIO().KeyCtrl
+                    && plugin.Configuration.CtrlRightClickTryOn
+                    && ItemActions.Equippable(item.ItemId))
+                {
+                    linkClaimedRightClick = true;
+                    ItemActions.TryOnOriginal(item.ItemId);
+                }
+                else if (clicked || rightClicked)
                 {
                     contextItem = item;
-                    linkClaimedRightClick |= ImGui.IsMouseClicked(ImGuiMouseButton.Right);
+                    linkClaimedRightClick |= rightClicked;
                     ImGui.OpenPopup(itemContextPopupId);
                 }
 

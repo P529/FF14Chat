@@ -50,7 +50,8 @@ Off by default; enabling it shows exactly what leaves your machine first.
 - **Player context menu** — right-click a name in the log or a tell tab: Send Tell, Target, Examine, Adventurer Plate, Invite to Party, Copy Name.
 - **Message context menu** — right-click any line: Translate / Show original, Copy Text.
 - **Item links** open the game's own tooltip on hover and a vanilla-style menu on click: Try On, Item Comparison, Search for Item, Search Recipes, Link, Copy Name.
-- **"Try On Original"** is added to the game's own item context menus. The native Try On previews an item as it is glamoured and dyed — this one previews the item's actual model. It only appears on glamoured equipment, where it has something to strip.
+- **"Try On Original"** is added to the game's own item context menus. The native Try On previews an item as it is glamoured and dyed — this one previews the item's actual model. It only appears on glamoured equipment, where it has something to strip, and on the examine window's gear, where the native Try On is always the dyed glamour.
+- **Ctrl+right-click tries an item on** without opening a menu at all — in the inventory, character and examine windows, or on an item link in chat. Off by default; the Settings → Tweaks tab has it, along with switches for `/examine`, `/mountid` and the menu entry above.
 
 ### History
 
@@ -90,7 +91,7 @@ Gets you automatic updates whenever a new release is published.
 | Right-click a player name | Context menu (tell, target, examine, invite...) |
 | Right-click a tab | Close / mark read (tell tabs) |
 
-Settings (`/xlplugins` → FF14Chat → gear icon, or the gear in the window): themes, font size, opacity, tab editor, colors, translation, history search and retention, mention highlight, presence dots, vanilla chat hiding, window lock.
+Settings (`/xlplugins` → FF14Chat → gear icon, or the gear in the window): themes, font size, opacity, tab editor, colors, translation, history search and retention, mention highlight, presence dots, vanilla chat hiding, window lock, and a Tweaks tab for the game-side extras (`/examine`, `/mountid`, the item-menu entry, Ctrl+right-click try-on).
 
 Chat history is stored in `%AppData%\XIVLauncher\pluginConfigs\FF14Chat\chat.db` (SQLite). Delete the file to wipe history; it prunes itself to 30 days.
 

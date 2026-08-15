@@ -27,6 +27,31 @@ state of what actually works.
 - FFXIV-native theming (4 themes), game font, item/map/player links with
   custom item tooltip cards.
 
+### Added 2026-08-16 (v0.3.4)
+- **"Try On Original" on examined gear.** The examine window is not an
+  inventory: `AgentInspect` holds the examined pieces itself (`Items` =the real
+  gear, `GlamourItems` = what they are wearing) and opens a plain
+  `AgentContext` menu, so none of the `AgentInventoryContext` path applied to
+  it — the entry simply never appeared there. Resolved off
+  `AgentInspect->SelectedItemSlot` instead, with no glamour test: examine's own
+  Try On previews the glamoured *and dyed* appearance either way, so there is
+  always something to strip.
+- **Ctrl+right-click tries an item on**, no menu at all (opt-in). Dalamud's
+  `OnMenuOpened` fires once the menu is committed, so suppression has to happen
+  a step earlier: hooks on `AgentInventoryContext.OpenForItemSlot` (bags,
+  armoury, character sheet, retainers) and `AgentContext.OpenContextMenuForAddon`
+  for the examine window, the latter gated on the owning addon id so only that
+  window's menus can be swallowed. Chat item links take the same shortcut in
+  ImGui. Both hooks are non-fatal: a patch-day break costs the shortcut, not
+  the menu entry.
+- **Tweaks tab in settings** — the game-side extras in one place: `/examine`
+  and `/mountid` (live toggles that actually add/remove the command handler, so
+  switching one off releases the name), the "Try On Original" entry and the
+  Ctrl+right-click shortcut. Command autocomplete follows automatically; it
+  scans the registered commands live.
+- Timestamps render with a trailing space. The line continues with
+  `SameLine(0, 0)`, so the gap has to be part of the stamp's own item width.
+
 ### Added 2026-08-07 (v0.3.3)
 - **`/mountid [Name@World]`** — prints what a character is riding, as a clickable
   item link to the whistle/card that teaches the mount, so the tooltip and the
@@ -248,9 +273,11 @@ state of what actually works.
   full-width-window case, ChatTwo-style input preview line.
 
 ## State of the tree
-- Public at https://github.com/P529/FF14Chat; latest release **v0.3.3.0**
-  (2026-08-07): `/mountid` and "Try On Original", plus the README rewritten
-  around the shipped feature set.
+- Public at https://github.com/P529/FF14Chat; latest release **v0.3.4.0**
+  (2026-08-16): "Try On Original" on examined gear, the Ctrl+right-click
+  try-on shortcut, and the Tweaks settings tab.
+- **v0.3.3.0** (2026-08-07): `/mountid` and "Try On Original", plus the README
+  rewritten around the shipped feature set.
 - **v0.3.2.0** (2026-08-05): sent lines keep their channel, the log lands on
   the newest line, tab slots hold. Earlier: **v0.3.1.0**, **v0.3.0.0**
   (translation), **v0.2.3.x** fixes.
